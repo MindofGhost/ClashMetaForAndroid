@@ -26,10 +26,22 @@ type Status struct {
 }
 
 func openUrl(ctx context.Context, url string) (io.ReadCloser, error) {
-	response, err := clashHttp.HttpRequest(ctx, url, http.MethodGet, http.Header{"User-Agent": {"ClashMetaForAndroid/" + app.VersionName()}}, nil)
+	header := http.Header{
+		"User-Agent": {"ClashMetaForAndroid/" + app.VersionName()},
+	}
+	if hwid := app.Hwid(); hwid != "" {
+		header.Set("x-hwid", hwid)
+	}
+
+	response, err := clashHttp.HttpRequest(ctx, url, http.MethodGet, header, nil)
 
 	if err != nil {
 		return nil, err
+	}
+
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		_ = response.Body.Close()
+		return nil, fmt.Errorf("unexpected http status %d of %s", response.StatusCode, url)
 	}
 
 	return response.Body, nil
@@ -40,6 +52,30 @@ func openContent(url string) (io.ReadCloser, error) {
 }
 
 func fetch(url *U.URL, file string) error {
+	attempts := 1
+	if url.Scheme == "http" || url.Scheme == "https" {
+		attempts = 3
+	}
+
+	var last error
+
+	for attempt := 0; attempt < attempts; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * time.Second)
+		}
+
+		if err := fetchOnce(url, file); err != nil {
+			last = err
+			continue
+		}
+
+		return nil
+	}
+
+	return last
+}
+
+func fetchOnce(url *U.URL, file string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
@@ -67,19 +103,34 @@ func fetch(url *U.URL, file string) error {
 func writeFile(file string, reader io.Reader) error {
 	_ = os.MkdirAll(P.Dir(file), 0700)
 
-	f, err := os.OpenFile(file, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0600)
+	tmp := file + ".tmp"
+
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0600)
 	if err != nil {
 		return err
 	}
 
-	defer f.Close()
-
 	_, err = io.Copy(f, reader)
 	if err != nil {
-		_ = os.Remove(file)
+		_ = f.Close()
+		_ = os.Remove(tmp)
+
+		return err
 	}
 
-	return err
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+
+		return err
+	}
+
+	if err := os.Rename(tmp, file); err != nil {
+		_ = os.Remove(tmp)
+
+		return err
+	}
+
+	return nil
 }
 
 func FetchAndValid(
@@ -117,7 +168,13 @@ func FetchAndValid(
 		return err
 	}
 
+	var providerErr error
+
 	forEachProviders(rawCfg, func(index int, total int, name string, provider map[string]any, prefix string) {
+		if providerErr != nil {
+			return
+		}
+
 		bytes, _ := json.Marshal(&Status{
 			Action:      "FetchProviders",
 			Args:        []string{name},
@@ -141,12 +198,13 @@ func FetchAndValid(
 			return
 		}
 
-		if _, err := os.Stat(ps); err == nil {
+		if _, err := os.Stat(ps); err == nil && !force {
 			return
 		}
 
 		url, err := U.Parse(us)
 		if err != nil {
+			providerErr = fmt.Errorf("parse provider %s url: %w", name, err)
 			return
 		}
 
@@ -166,8 +224,14 @@ func FetchAndValid(
 			}
 		}
 
-		_ = fetch(url, ps)
+		if err := fetch(url, ps); err != nil {
+			providerErr = fmt.Errorf("fetch provider %s: %w", name, err)
+		}
 	})
+
+	if providerErr != nil {
+		return providerErr
+	}
 
 	bytes, _ := json.Marshal(&Status{
 		Action:      "Verifying",

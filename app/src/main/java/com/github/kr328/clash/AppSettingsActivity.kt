@@ -1,7 +1,13 @@
 package com.github.kr328.clash
 
 import android.content.ComponentName
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
+import androidx.core.content.getSystemService
 import com.github.kr328.clash.common.util.componentName
 import com.github.kr328.clash.design.AppSettingsDesign
 import com.github.kr328.clash.design.model.Behavior
@@ -34,8 +40,15 @@ class AppSettingsActivity : BaseActivity<AppSettingsDesign>(), Behavior {
                     }
                 }
                 design.requests.onReceive {
-                    ApplicationObserver.createdActivities.forEach {
-                        it.recreate()
+                    when (it) {
+                        AppSettingsDesign.Request.ReCreateAllActivities -> {
+                            ApplicationObserver.createdActivities.forEach {
+                                it.recreate()
+                            }
+                        }
+                        AppSettingsDesign.Request.RequestIgnoreBatteryOptimizations -> {
+                            requestIgnoreBatteryOptimizations()
+                        }
                     }
                 }
             }
@@ -74,5 +87,24 @@ class AppSettingsActivity : BaseActivity<AppSettingsDesign>(), Behavior {
             newState,
             PackageManager.DONT_KILL_APP
         )
+    }
+
+    private fun requestIgnoreBatteryOptimizations() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M)
+            return
+
+        val powerManager = getSystemService<PowerManager>()
+        val intent = if (powerManager?.isIgnoringBatteryOptimizations(packageName) == true) {
+            Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+        } else {
+            Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                .setData(Uri.parse("package:$packageName"))
+        }
+
+        runCatching {
+            startActivity(intent)
+        }.onFailure {
+            startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+        }
     }
 }

@@ -23,13 +23,14 @@ func main() {
 }
 
 //export coreInit
-func coreInit(home, versionName, gitVersion C.c_string, sdkVersion C.int) {
+func coreInit(home, versionName, gitVersion C.c_string, sdkVersion C.int, hwid C.c_string) {
 	h := C.GoString(home)
 	v := C.GoString(versionName)
 	g := C.GoString(gitVersion)
 	s := int(sdkVersion)
+	id := C.GoString(hwid)
 
-	delegate.Init(h, v, g, s)
+	delegate.Init(h, v, g, s, id)
 
 	reset()
 }

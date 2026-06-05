@@ -3,6 +3,7 @@ package com.github.kr328.clash.service
 import android.content.Context
 import android.net.Uri
 import com.github.kr328.clash.common.log.Log
+import com.github.kr328.clash.common.util.hwid
 import com.github.kr328.clash.core.Clash
 import com.github.kr328.clash.service.data.Imported
 import com.github.kr328.clash.service.data.ImportedDao
@@ -80,7 +81,8 @@ object ProfileProcessor {
                                     val versionName =
                                         context.packageManager.getPackageInfo(context.packageName, 0).versionName
                                     val request = Request.Builder().url(snapshot.source)
-                                        .header("User-Agent", "ClashMetaForAndroid/$versionName").build()
+                                        .header("User-Agent", "ClashMetaForAndroid/$versionName")
+                                        .header("x-hwid", context.hwid).build()
 
                                     client.newCall(request).execute().use { response ->
                                         val userinfo = response.headers["subscription-userinfo"]

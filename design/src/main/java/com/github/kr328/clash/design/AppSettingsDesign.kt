@@ -22,7 +22,8 @@ class AppSettingsDesign(
     onHideIconChange: (hide: Boolean) -> Unit,
 ) : Design<AppSettingsDesign.Request>(context) {
     enum class Request {
-        ReCreateAllActivities
+        ReCreateAllActivities,
+        RequestIgnoreBatteryOptimizations,
     }
 
     private val binding = DesignSettingsCommonBinding
@@ -47,6 +48,16 @@ class AppSettingsDesign(
                 title = R.string.auto_restart,
                 summary = R.string.allow_clash_auto_restart,
             )
+
+            clickable(
+                title = R.string.battery_optimization,
+                icon = R.drawable.ic_baseline_flash_on,
+                summary = R.string.battery_optimization_summary,
+            ) {
+                clicked {
+                    requests.trySend(Request.RequestIgnoreBatteryOptimizations)
+                }
+            }
 
             category(R.string.interface_)
 

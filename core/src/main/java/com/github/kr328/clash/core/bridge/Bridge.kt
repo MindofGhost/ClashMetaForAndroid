@@ -5,6 +5,7 @@ import android.os.ParcelFileDescriptor
 import androidx.annotation.Keep
 import com.github.kr328.clash.common.Global
 import com.github.kr328.clash.common.log.Log
+import com.github.kr328.clash.common.util.hwid
 import kotlinx.coroutines.CompletableDeferred
 import java.io.File
 
@@ -52,7 +53,7 @@ object Bridge {
 
     external fun nativeSetAgeSecretKey(key: String?)
 
-    private external fun nativeInit(home: String, versionName: String, sdkVersion: Int)
+    private external fun nativeInit(home: String, versionName: String, sdkVersion: Int, hwid: String)
 
     init {
         System.loadLibrary("bridge")
@@ -65,9 +66,10 @@ object Bridge {
         val home = ctx.filesDir.resolve("clash").apply { mkdirs() }.absolutePath
         val versionName = ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: "unknown"
         val sdkVersion = Build.VERSION.SDK_INT
+        val hwid = ctx.hwid
 
         Log.d("Home = $home")
 
-        nativeInit(home, versionName, sdkVersion)
+        nativeInit(home, versionName, sdkVersion, hwid)
     }
 }

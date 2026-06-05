@@ -116,6 +116,8 @@
 
     <string name="auto_restart">Auto Restart</string>
     <string name="allow_clash_auto_restart">Allow clash auto restart</string>
+    <string name="battery_optimization">Battery Optimization</string>
+    <string name="battery_optimization_summary">Allow Clash to keep running in the background</string>
 
     <string name="route_system_traffic">Route System Traffic</string>
     <string name="routing_via_vpn_service">Auto routing all system traffic via VpnService</string>

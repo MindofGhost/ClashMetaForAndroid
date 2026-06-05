@@ -3,6 +3,7 @@ build/
 /app/foss/release
 /app/premium/release
 /captures
+/dist
 
 # Ignore Gradle GUI config
 gradle-app.setting
@@ -32,6 +33,7 @@ app/src/main/assets
 
 # KeyStore
 signing.properties
+local-signing/
 *.keystore
 *.jks
 

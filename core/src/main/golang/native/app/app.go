@@ -7,6 +7,7 @@ import (
 )
 
 var appVersionName string
+var appHwid string
 var platformVersion int
 var installedAppsUid = map[int]string{}
 
@@ -18,8 +19,16 @@ func ApplyPlatformVersion(version int) {
 	platformVersion = version
 }
 
+func ApplyHwid(hwid string) {
+	appHwid = hwid
+}
+
 func VersionName() string {
 	return appVersionName
+}
+
+func Hwid() string {
+	return appHwid
 }
 
 func PlatformVersion() int {

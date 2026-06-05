@@ -92,20 +92,6 @@ class ProfilesActivity : BaseActivity<ProfilesDesign>() {
         }
     }
 
-    override fun onProfileUpdateCompleted(uuid: UUID?) {
-        if(uuid == null)
-            return;
-        launch {
-            var name: String? = null;
-            withProfile {
-                name = queryByUUID(uuid)?.name
-            }
-            design?.showToast(
-                getString(R.string.toast_profile_updated_complete, name),
-                ToastDuration.Long
-            )
-        }
-    }
     override fun onProfileUpdateFailed(uuid: UUID?, reason: String?) {
         if(uuid == null)
             return;

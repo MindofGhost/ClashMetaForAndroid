@@ -14,14 +14,16 @@
 JNIEXPORT void JNICALL
 Java_com_github_kr328_clash_core_bridge_Bridge_nativeInit(JNIEnv *env, jobject thiz,
                                                           jstring home,
-                                                          jstring version_name, jint sdk_version) {
+                                                          jstring version_name, jint sdk_version,
+                                                          jstring hwid) {
     TRACE_METHOD();
 
     scoped_string _home = get_string(home);
     scoped_string _version_name = get_string(version_name);
+    scoped_string _hwid = get_string(hwid);
     char* _git_version = make_String(GIT_VERSION);
 
-    coreInit(_home, _version_name, _git_version, sdk_version);
+    coreInit(_home, _version_name, _git_version, sdk_version, _hwid);
 }
 
 JNIEXPORT void JNICALL

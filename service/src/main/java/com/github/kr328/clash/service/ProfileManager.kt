@@ -2,6 +2,7 @@ package com.github.kr328.clash.service
 
 import android.content.Context
 import com.github.kr328.clash.common.log.Log
+import com.github.kr328.clash.common.util.hwid
 import com.github.kr328.clash.service.data.Database
 import com.github.kr328.clash.service.data.Imported
 import com.github.kr328.clash.service.data.ImportedDao
@@ -148,6 +149,7 @@ class ProfileManager(private val context: Context) : IProfileManager,
             val request = Request.Builder()
                 .url(old.source)
                 .header("User-Agent", "ClashMetaForAndroid/$versionName")
+                .header("x-hwid", context.hwid)
                 .build()
 
             client.newCall(request).execute().use { response ->

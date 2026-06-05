@@ -97,7 +97,7 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         sendClashStarted()
 
-        return super.onStartCommand(intent, flags, startId)
+        return START_STICKY
     }
 
     override fun onDestroy() {

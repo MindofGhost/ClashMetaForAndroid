@@ -18,7 +18,7 @@ import (
 
 var errBlocked = errors.New("blocked")
 
-func Init(home, versionName, gitVersion string, platformVersion int) {
+func Init(home, versionName, gitVersion string, platformVersion int, hwid string) {
 	log.Infoln("Init core, home: %s, versionName: %s, gitVersion: %s, platformVersion: %d", home, versionName, gitVersion, platformVersion)
 	constant.SetHomeDir(home)
 	// gitVersion = ${CURRENT_BRANCH}_${COMMIT_HASH}_${COMPILE_TIME}
@@ -31,6 +31,7 @@ func Init(home, versionName, gitVersion string, platformVersion int) {
 	constant.Version = strings.ToLower(constant.Version)
 	app.ApplyVersionName(versionName)
 	app.ApplyPlatformVersion(platformVersion)
+	app.ApplyHwid(hwid)
 
 	process.DefaultPackageNameResolver = func(metadata *constant.Metadata) (string, error) {
 		src, dst := metadata.RawSrcAddr, metadata.RawDstAddr

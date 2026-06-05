@@ -108,8 +108,13 @@ subprojects {
 
                 buildConfigField("boolean", "PREMIUM", "Boolean.parseBoolean(\"false\")")
 
-                resValue("string", "launch_name", "@string/launch_name_alpha")
-                resValue("string", "application_name", "@string/application_name_alpha")
+                if (isApp || project.name == "design") {
+                    resValue("string", "launch_name", "@string/launch_name_alpha")
+                    resValue("string", "application_name", "@string/application_name_alpha")
+                } else {
+                    resValue("string", "launch_name", "Clash Meta Alpha")
+                    resValue("string", "application_name", "Clash Meta for Android Alpha")
+                }
 
                 if (isApp && !removeSuffix) {
                     applicationIdSuffix = ".alpha"
@@ -125,8 +130,13 @@ subprojects {
 
                 buildConfigField("boolean", "PREMIUM", "Boolean.parseBoolean(\"false\")")
 
-                resValue("string", "launch_name", "@string/launch_name_meta")
-                resValue("string", "application_name", "@string/application_name_meta")
+                if (isApp || project.name == "design") {
+                    resValue("string", "launch_name", "@string/launch_name_meta")
+                    resValue("string", "application_name", "@string/application_name_meta")
+                } else {
+                    resValue("string", "launch_name", "Clash Meta")
+                    resValue("string", "application_name", "Clash Meta for Android")
+                }
 
                 if (isApp && !removeSuffix) {
                     applicationIdSuffix = ".meta"
@@ -151,7 +161,7 @@ subprojects {
                         keystore.inputStream().use(this::load)
                     }
 
-                    storeFile = rootProject.file("release.keystore")
+                    storeFile = rootProject.file(prop.getProperty("keystore.file", "release.keystore"))
                     storePassword = prop.getProperty("keystore.password")!!
                     keyAlias = prop.getProperty("key.alias")!!
                     keyPassword = prop.getProperty("key.password")!!

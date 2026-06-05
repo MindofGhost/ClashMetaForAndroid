@@ -5,6 +5,7 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import androidx.core.content.getSystemService
 import com.github.kr328.clash.common.Global
 import com.github.kr328.clash.common.compat.pendingIntentFlags
@@ -97,7 +98,17 @@ class ProfileReceiver : BroadcastReceiver() {
             val interval = (imported.interval - (current - last)).coerceAtLeast(0)
 
             context.getSystemService<AlarmManager>()
-                ?.set(AlarmManager.RTC, current + interval, intent)
+                ?.scheduleCompat(current + interval, intent)
+        }
+
+        fun scheduleRetry(context: Context, imported: Imported) {
+            if (imported.interval < TimeUnit.MINUTES.toMillis(15))
+                return
+
+            val intent = pendingIntentOf(context, imported)
+
+            context.getSystemService<AlarmManager>()
+                ?.scheduleCompat(System.currentTimeMillis() + RETRY_DELAY, intent)
         }
 
         private suspend fun reset() = lock.withLock {
@@ -116,5 +127,19 @@ class ProfileReceiver : BroadcastReceiver() {
                 pendingIntentFlags(PendingIntent.FLAG_UPDATE_CURRENT)
             )
         }
+
+        private fun AlarmManager.scheduleCompat(at: Long, intent: PendingIntent) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, intent)
+                } else {
+                    set(AlarmManager.RTC_WAKEUP, at, intent)
+                }
+            } catch (_: Exception) {
+                set(AlarmManager.RTC, at, intent)
+            }
+        }
+
+        private val RETRY_DELAY = TimeUnit.MINUTES.toMillis(15)
     }
 }

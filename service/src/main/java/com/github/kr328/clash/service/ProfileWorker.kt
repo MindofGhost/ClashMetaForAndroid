@@ -84,15 +84,40 @@ class ProfileWorker : BaseService() {
 
         try {
             processing(imported.name) {
-                ProfileProcessor.update(this, imported.uuid, null)
+                updateWithRetry(imported.uuid)
             }
 
-            completed(imported.uuid, imported.name)
+            completed(imported.uuid)
 
-            ProfileReceiver.scheduleNext(this, imported)
+            ImportedDao().queryByUUID(imported.uuid)?.let {
+                ProfileReceiver.scheduleNext(this, it)
+            }
         } catch (e: Exception) {
+            ImportedDao().queryByUUID(imported.uuid)?.let {
+                ProfileReceiver.scheduleRetry(this, it)
+            }
+
             failed(imported.uuid, imported.name, e.message ?: "Unknown")
         }
+    }
+
+    private suspend fun updateWithRetry(uuid: UUID) {
+        var last: Exception? = null
+
+        repeat(MAX_UPDATE_ATTEMPTS) { attempt ->
+            try {
+                ProfileProcessor.update(this, uuid, null)
+                return
+            } catch (e: Exception) {
+                last = e
+
+                if (attempt != MAX_UPDATE_ATTEMPTS - 1) {
+                    delay(RETRY_DELAYS[attempt])
+                }
+            }
+        }
+
+        throw last ?: IllegalStateException("Profile update failed")
     }
 
     private fun createChannels() {
@@ -169,17 +194,7 @@ class ProfileWorker : BaseService() {
             .setGroup(RESULT_CHANNEL)
     }
 
-    private fun completed(uuid: UUID, name: String) {
-        val id = UndefinedIds.next()
-
-        val notification = resultBuilder(id, uuid)
-            .setContentTitle(getString(R.string.update_successfully))
-            .setContentText(getString(R.string.format_update_complete, name))
-            .build()
-
-        NotificationManagerCompat.from(this)
-            .notify(id, notification)
-
+    private fun completed(uuid: UUID) {
         sendProfileUpdateCompleted(uuid)
     }
 
@@ -204,6 +219,11 @@ class ProfileWorker : BaseService() {
         private const val SERVICE_CHANNEL = "profile_service_channel"
         private const val STATUS_CHANNEL = "profile_status_channel"
         private const val RESULT_CHANNEL = "profile_result_channel"
+        private const val MAX_UPDATE_ATTEMPTS = 3
+        private val RETRY_DELAYS = longArrayOf(
+            TimeUnit.SECONDS.toMillis(10),
+            TimeUnit.SECONDS.toMillis(30),
+        )
     }
 
     override fun onBind(intent: Intent?): IBinder {
