@@ -5,16 +5,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
 	U "net/url"
 	"os"
 	P "path"
 	"runtime"
+	"syscall"
 	"time"
 
 	"cfa/native/app"
 
 	clashHttp "github.com/metacubex/mihomo/component/http"
+	C "github.com/metacubex/mihomo/constant"
 	RB "github.com/metacubex/mihomo/rules/bundle"
 )
 
@@ -25,7 +29,47 @@ type Status struct {
 	MaxProgress int      `json:"max"`
 }
 
-func openUrl(ctx context.Context, url string) (io.ReadCloser, error) {
+type protectedDialer struct {
+	net.Dialer
+}
+
+var _ C.Dialer = (*protectedDialer)(nil)
+
+func (d *protectedDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	return d.Dialer.DialContext(ctx, network, address)
+}
+
+func (d *protectedDialer) ListenPacket(ctx context.Context, network, address string, _ netip.AddrPort) (net.PacketConn, error) {
+	listener := net.ListenConfig{
+		Control: d.Dialer.Control,
+	}
+
+	return listener.ListenPacket(ctx, network, address)
+}
+
+func newProtectedDialer() *protectedDialer {
+	dialer := &protectedDialer{
+		Dialer: net.Dialer{
+			Timeout:   20 * time.Second,
+			KeepAlive: 30 * time.Second,
+		},
+	}
+
+	dialer.Control = func(_, _ string, conn syscall.RawConn) error {
+		var controlErr error
+		if err := conn.Control(func(fd uintptr) {
+			app.MarkSocket(int(fd))
+		}); err != nil {
+			controlErr = err
+		}
+
+		return controlErr
+	}
+
+	return dialer
+}
+
+func openUrl(ctx context.Context, url string, direct bool) (io.ReadCloser, error) {
 	header := http.Header{
 		"User-Agent": {"ClashMetaForAndroid/" + app.VersionName()},
 	}
@@ -33,7 +77,12 @@ func openUrl(ctx context.Context, url string) (io.ReadCloser, error) {
 		header.Set("x-hwid", hwid)
 	}
 
-	response, err := clashHttp.HttpRequest(ctx, url, http.MethodGet, header, nil)
+	options := []clashHttp.Option{}
+	if direct {
+		options = append(options, clashHttp.WithDialer(newProtectedDialer()))
+	}
+
+	response, err := clashHttp.HttpRequest(ctx, url, http.MethodGet, header, nil, options...)
 
 	if err != nil {
 		return nil, err
@@ -53,7 +102,8 @@ func openContent(url string) (io.ReadCloser, error) {
 
 func fetch(url *U.URL, file string) error {
 	attempts := 1
-	if url.Scheme == "http" || url.Scheme == "https" {
+	httpUrl := url.Scheme == "http" || url.Scheme == "https"
+	if httpUrl {
 		attempts = 3
 	}
 
@@ -72,10 +122,26 @@ func fetch(url *U.URL, file string) error {
 		return nil
 	}
 
+	if httpUrl {
+		if err := fetchOnceDirect(url, file); err != nil {
+			return fmt.Errorf("%w; direct retry failed: %v", last, err)
+		}
+
+		return nil
+	}
+
 	return last
 }
 
 func fetchOnce(url *U.URL, file string) error {
+	return fetchOnceWithRoute(url, file, false)
+}
+
+func fetchOnceDirect(url *U.URL, file string) error {
+	return fetchOnceWithRoute(url, file, true)
+}
+
+func fetchOnceWithRoute(url *U.URL, file string, direct bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
@@ -84,7 +150,7 @@ func fetchOnce(url *U.URL, file string) error {
 
 	switch url.Scheme {
 	case "http", "https":
-		reader, err = openUrl(ctx, url.String())
+		reader, err = openUrl(ctx, url.String(), direct)
 	case "content":
 		reader, err = openContent(url.String())
 	default:
