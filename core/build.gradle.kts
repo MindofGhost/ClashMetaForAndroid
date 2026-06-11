@@ -59,6 +59,17 @@ dependencies {
 afterEvaluate {
     tasks.withType(GolangBuildTask::class.java).forEach {
         it.inputs.dir(golangSource)
+        it.doFirst {
+            val args = it.commandLine.map { arg -> arg.toString() }.toMutableList()
+            val ldflags = args.indexOf("-ldflags")
+
+            if (ldflags >= 0 && ldflags + 1 < args.size) {
+                if (!args[ldflags + 1].contains("-checklinkname=0")) {
+                    args[ldflags + 1] = "${args[ldflags + 1]} -checklinkname=0"
+                    it.commandLine(args)
+                }
+            }
+        }
     }
 }
 

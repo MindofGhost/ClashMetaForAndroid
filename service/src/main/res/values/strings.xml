@@ -3,6 +3,9 @@
     <string name="clash_notification_content" translatable="false">"%1$s↑\t%2$s↓"</string>
 
     <string name="clash_service_status_channel">Clash Status</string>
+    <string name="vk_turn_captcha_channel">VK TURN Captcha</string>
+    <string name="vk_turn_captcha_title">Captcha required</string>
+    <string name="vk_turn_captcha_text">Tap to complete VK TURN verification</string>
     <string name="profile_service_status">Profile Service Status</string>
     <string name="profile_process_status">Profile Processing Status</string>
     <string name="profile_process_result">Profile Process Result</string>

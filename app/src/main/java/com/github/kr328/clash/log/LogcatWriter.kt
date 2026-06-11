@@ -9,7 +9,10 @@ import java.io.FileWriter
 
 class LogcatWriter(context: Context) : AutoCloseable {
     private val file = LogFile.generate()
-    private val writer = BufferedWriter(FileWriter(context.logsDir.resolve(file.fileName)))
+    private val logFile = context.logsDir.resolve(file.fileName).apply {
+        writeText("")
+    }
+    private val writer = BufferedWriter(FileWriter(logFile, true))
 
     override fun close() {
         writer.close()
@@ -17,6 +20,7 @@ class LogcatWriter(context: Context) : AutoCloseable {
 
     fun appendMessage(message: LogMessage) {
         writer.appendLine(FORMAT.format(message.time.time, message.level.name, message.message))
+        writer.flush()
     }
 
     companion object {

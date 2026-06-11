@@ -9,6 +9,7 @@ import (
 	_ "cfa/native/proxy"
 	_ "cfa/native/tun"
 	_ "cfa/native/tunnel"
+	_ "cfa/native/vkturn"
 
 	_ "golang.org/x/sync/semaphore"
 

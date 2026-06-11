@@ -56,6 +56,11 @@ class ServiceStore(context: Context) {
         defaultValue = false
     )
 
+    var vkTurnFallback by store.boolean(
+        key = "vk_turn_fallback",
+        defaultValue = false
+    )
+
     var tunStackMode by store.string(
         key = "tun_stack_mode",
         defaultValue = "system"

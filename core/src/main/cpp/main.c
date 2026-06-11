@@ -159,6 +159,40 @@ Java_com_github_kr328_clash_core_bridge_Bridge_nativeStopHttp(JNIEnv *env, jobje
     stopHttp();
 }
 
+JNIEXPORT void JNICALL
+Java_com_github_kr328_clash_core_bridge_Bridge_nativeStartVkTurn(JNIEnv *env, jobject thiz,
+                                                                 jstring args) {
+    TRACE_METHOD();
+
+    scoped_string _args = get_string(args);
+
+    startVkTurn(_args);
+}
+
+JNIEXPORT void JNICALL
+Java_com_github_kr328_clash_core_bridge_Bridge_nativeSubscribeVkTurnEvents(JNIEnv *env, jobject thiz,
+                                                                           jobject callback) {
+    TRACE_METHOD();
+
+    jobject _callback = new_global(callback);
+
+    subscribeVkTurnEvents(_callback);
+}
+
+JNIEXPORT void JNICALL
+Java_com_github_kr328_clash_core_bridge_Bridge_nativeStopVkTurn(JNIEnv *env, jobject thiz) {
+    TRACE_METHOD();
+
+    stopVkTurn();
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_github_kr328_clash_core_bridge_Bridge_nativeIsVkTurnRunning(JNIEnv *env, jobject thiz) {
+    TRACE_METHOD();
+
+    return isVkTurnRunning() != 0;
+}
+
 JNIEXPORT jstring JNICALL
 Java_com_github_kr328_clash_core_bridge_Bridge_nativeQueryGroupNames(JNIEnv *env, jobject thiz,
                                                                      jboolean exclude_not_selectable) {

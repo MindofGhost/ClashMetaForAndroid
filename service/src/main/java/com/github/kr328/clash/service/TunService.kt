@@ -33,6 +33,7 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
         val tun = install(TunModule(self))
         val config = install(ConfigurationModule(self))
         val network = install(NetworkObserveModule(self))
+        install(VkTurnFallbackModule(self))
 
         if (store.dynamicNotification)
             install(DynamicNotificationModule(self))
@@ -159,11 +160,13 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
                 AccessControlMode.AcceptSelected -> {
                     (store.accessControlPackages + packageName).forEach {
                         runCatching { addAllowedApplication(it) }
+                            .onFailure { e -> Log.w("Unable to allow $it in VPN", e) }
                     }
                 }
                 AccessControlMode.DenySelected -> {
                     (store.accessControlPackages - packageName).forEach {
                         runCatching { addDisallowedApplication(it) }
+                            .onFailure { e -> Log.w("Unable to exclude $it from VPN", e) }
                     }
                 }
             }

@@ -5,7 +5,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 IMAGE="${IMAGE:-ghcr.io/cirruslabs/android-sdk:35}"
 DOCKER_CONTEXT_NAME="${DOCKER_CONTEXT_NAME:-default}"
-GO_VERSION="${GO_VERSION:-1.20.14}"
+GO_VERSION="${GO_VERSION:-1.25.5}"
+GOFLAGS="${GOFLAGS:--ldflags=-checklinkname=0}"
 FLAVOR="${FLAVOR:-alpha}"
 BUILD_TYPE="${BUILD_TYPE:-Release}"
 RELEASE_TAG="${RELEASE_TAG:-}"
@@ -71,6 +72,7 @@ GROUP_ID="$(id -g)"
 docker_args=(
   run --rm
   -e "GO_VERSION=$GO_VERSION"
+  -e "GOFLAGS=$GOFLAGS"
   -e "FLAVOR=$FLAVOR"
   -e "BUILD_TYPE=$BUILD_TYPE"
   -e "RELEASE_TAG=$RELEASE_TAG"
@@ -133,9 +135,19 @@ if [[ -f /workspace/local.properties ]]; then
   cp /workspace/local.properties /tmp/workspace.local.properties.bak
 fi
 
+cached_go_version=""
 if [[ -x /toolchain/go/bin/go ]]; then
+  cached_go_version="$(/toolchain/go/bin/go version | awk '"'"'{print $3}'"'"')"
+fi
+
+system_go_version=""
+if command -v go >/dev/null 2>&1; then
+  system_go_version="$(go version | awk '"'"'{print $3}'"'"')"
+fi
+
+if [[ "$cached_go_version" == "go${GO_VERSION}" ]]; then
   export PATH="/toolchain/go/bin:$PATH"
-elif ! command -v go >/dev/null 2>&1; then
+elif [[ "$system_go_version" != "go${GO_VERSION}" ]]; then
   arch="$(uname -m)"
   case "$arch" in
     x86_64|amd64) go_arch="amd64" ;;

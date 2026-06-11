@@ -98,6 +98,28 @@ object Clash {
         Bridge.nativeStopHttp()
     }
 
+    fun startVkTurn(args: List<String>) {
+        Bridge.nativeStartVkTurn(quoteCommandLine(args))
+    }
+
+    fun subscribeVkTurnEvents(): ReceiveChannel<String> {
+        return Channel<String>(Channel.UNLIMITED).apply {
+            Bridge.nativeSubscribeVkTurnEvents(object : LogcatInterface {
+                override fun received(jsonPayload: String) {
+                    trySend(jsonPayload)
+                }
+            })
+        }
+    }
+
+    fun stopVkTurn() {
+        Bridge.nativeStopVkTurn()
+    }
+
+    fun isVkTurnRunning(): Boolean {
+        return Bridge.nativeIsVkTurnRunning()
+    }
+
     fun queryGroupNames(excludeNotSelectable: Boolean): List<String> {
         val names = Json.Default.decodeFromString(
             JsonArray.serializer(),
@@ -228,5 +250,23 @@ object Clash {
 
     fun setAgeSecretKey(key: String?) {
         Bridge.nativeSetAgeSecretKey(key)
+    }
+
+    private fun quoteCommandLine(args: List<String>): String {
+        return args.joinToString(" ") { arg ->
+            if (arg.isNotEmpty() && arg.none { it.isWhitespace() || it == '\'' || it == '"' || it == '\\' }) {
+                arg
+            } else {
+                buildString {
+                    append('"')
+                    arg.forEach {
+                        if (it == '"' || it == '\\')
+                            append('\\')
+                        append(it)
+                    }
+                    append('"')
+                }
+            }
+        }
     }
 }

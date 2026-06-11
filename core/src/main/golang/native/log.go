@@ -48,7 +48,9 @@ func subscribeLogcat(remote unsafe.Pointer) {
 		defer log.UnSubscribe(sub)
 
 		for msg := range sub {
-			if msg.LogLevel < log.Level() && !strings.HasPrefix(msg.Payload, "[APP]") {
+			if msg.LogLevel < log.Level() &&
+				!strings.HasPrefix(msg.Payload, "[APP]") &&
+				!strings.HasPrefix(msg.Payload, "[VK_TURN]") {
 				continue
 			}
 

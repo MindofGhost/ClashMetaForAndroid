@@ -25,6 +25,8 @@ func HealthCheck(name string) {
 		return
 	}
 
+	g.Touch()
+
 	wg := &sync.WaitGroup{}
 
 	for _, pr := range g.Providers() {

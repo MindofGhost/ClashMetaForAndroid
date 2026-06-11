@@ -1,0 +1,551 @@
+package com.github.kr328.clash.service.clash.module
+
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Intent
+import android.net.Uri
+import androidx.core.app.NotificationChannelCompat
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import com.github.kr328.clash.common.compat.getColorCompat
+import com.github.kr328.clash.common.compat.pendingIntentFlags
+import com.github.kr328.clash.common.log.Log
+import com.github.kr328.clash.core.Clash
+import com.github.kr328.clash.core.model.LogMessage
+import com.github.kr328.clash.core.model.Proxy
+import com.github.kr328.clash.core.model.ProxySort
+import com.github.kr328.clash.service.R
+import com.github.kr328.clash.service.store.ServiceStore
+import com.github.kr328.clash.service.util.AppLogWriter
+import com.github.kr328.clash.service.util.importedDir
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+
+class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
+    private val store = ServiceStore(service)
+
+    private var logcat: Job? = null
+    private var watchdog: Job? = null
+    private var runningArgs: List<String>? = null
+    private var openedCaptchaUrl: String? = null
+    private var moduleScope: CoroutineScope? = null
+    private val notificationManager = NotificationManagerCompat.from(service)
+
+    override suspend fun run() = coroutineScope {
+        moduleScope = this
+
+        logInfo("VK TURN fallback module initialized, enabled=${store.vkTurnFallback}")
+
+        if (!store.vkTurnFallback) {
+            logInfo("VK TURN fallback disabled")
+            return@coroutineScope
+        }
+
+        logInfo("VK TURN fallback enabled")
+
+        createCaptchaNotificationChannel()
+
+        val captchaSubmitted = receiveBroadcast(false) {
+            addAction(CAPTCHA_SUBMITTED_ACTION)
+        }
+
+        launch {
+            for (ignored in captchaSubmitted) {
+                openedCaptchaUrl = null
+                logInfo("VK TURN fallback captcha submitted")
+                cancelCaptchaNotification()
+            }
+        }
+
+        logcat = launch {
+            coroutineScope {
+                launch {
+                    val events = Clash.subscribeVkTurnEvents()
+
+                    try {
+                        for (line in events) {
+                            handleProcessLine(line)
+                        }
+                    } finally {
+                        events.cancel()
+                    }
+                }
+
+                launch {
+                    val logs = Clash.subscribeLogcat()
+
+                    try {
+                        for (message in logs) {
+                            if (message.message.contains(VK_TURN_LOG_PREFIX)) {
+                                handleProcessLine(message.message)
+                            }
+                        }
+                    } finally {
+                        logs.cancel()
+                    }
+                }
+            }
+        }
+
+        delay(INITIAL_DELAY)
+
+        try {
+            while (isActive) {
+                val args = readFallbackArguments()
+
+                if (args == null) {
+                    logInfo("VK TURN fallback arguments are absent")
+                    stopProcess("fallback configuration is absent")
+                } else {
+                    val availableEndpoints = runCatching {
+                        availableEndpointCount()
+                    }.getOrElse {
+                        logWarning("VK TURN fallback health check failed", it)
+
+                            STOP_THRESHOLD
+                        }
+
+                    logInfo(
+                        "VK TURN fallback check: availableEndpoints=$availableEndpoints " +
+                                "args=${args.joinToString(" ")}"
+                    )
+
+                    when {
+                        availableEndpoints == 0 -> startProcess(args)
+                        availableEndpoints >= STOP_THRESHOLD -> stopProcess(
+                            "$availableEndpoints endpoints are available"
+                        )
+                    }
+                }
+
+                delay(CHECK_INTERVAL)
+            }
+        } finally {
+            stopProcess("service stopped")
+            runCatching {
+                logcat?.cancelAndJoin()
+            }.onFailure {
+                logWarning("VK TURN fallback logcat cancel failed: ${it.message}", it)
+            }
+            logcat = null
+            watchdog?.cancel()
+            watchdog = null
+            moduleScope = null
+        }
+    }
+
+    private suspend fun readFallbackArguments(): List<String>? = withContext(Dispatchers.IO) {
+        val profile = store.activeProfile
+        if (profile == null) {
+            logInfo("VK TURN fallback active profile is absent")
+
+            return@withContext null
+        }
+
+        val config = service.importedDir
+            .resolve(profile.toString())
+            .resolve("config.yaml")
+
+        if (!config.isFile) {
+            logInfo("VK TURN fallback config is absent: ${config.absolutePath}")
+
+            return@withContext null
+        }
+
+        val firstLine = config.bufferedReader().use { it.readLine() }
+        if (firstLine == null) {
+            logInfo("VK TURN fallback config is empty: ${config.absolutePath}")
+
+            return@withContext null
+        }
+
+        val comment = firstLine.trim().takeIf { it.startsWith("#") }
+            ?.drop(1)
+            ?.trim()
+        if (comment == null) {
+            logInfo("VK TURN fallback first config line is not a comment")
+
+            return@withContext null
+        }
+
+        if (!comment.startsWith("-")) {
+            logInfo("VK TURN fallback first comment does not look like arguments")
+
+            return@withContext null
+        }
+
+        runCatching {
+            parseCommandLine(comment)
+        }.getOrElse {
+            logWarning("VK TURN fallback arguments are invalid", it)
+
+            null
+        }?.takeIf { it.isNotEmpty() }
+    }
+
+    private suspend fun availableEndpointCount(): Int {
+        val groups = Clash.queryGroupNames(false)
+
+        if (groups.isEmpty())
+            return STOP_THRESHOLD
+
+        groups.forEach {
+            runCatching {
+                withTimeoutOrNull(HEALTH_CHECK_TIMEOUT) {
+                    Clash.healthCheck(it).await()
+                }
+            }.onFailure { e ->
+                logInfo("VK TURN fallback health check failed for $it", e)
+            }
+        }
+
+        return groups.flatMap { group ->
+            runCatching {
+                Clash.queryGroup(group, ProxySort.Delay).proxies.filter(::isAvailableEndpoint)
+            }.getOrDefault(emptyList())
+        }.map { it.name }.distinct().size
+    }
+
+    private fun isAvailableEndpoint(proxy: Proxy): Boolean {
+        if (proxy.type.group)
+            return false
+
+        if (proxy.type in NON_ENDPOINT_TYPES)
+            return false
+
+        return proxy.delay in 1 until UNAVAILABLE_DELAY
+    }
+
+    private fun startProcess(args: List<String>) {
+        if (runningArgs == args) {
+            if (Clash.isVkTurnRunning())
+                return
+
+            logWarning("VK TURN fallback state was running, but core is stopped; restarting")
+            runningArgs = null
+            openedCaptchaUrl = null
+            watchdog?.cancel()
+            watchdog = null
+            cancelCaptchaNotification()
+        }
+
+        if (runningArgs != null)
+            stopProcess("fallback arguments changed")
+
+        runCatching {
+            logInfo("VK TURN fallback starting in core: ${args.joinToString(" ")}")
+
+            Clash.startVkTurn(args)
+        }.onSuccess {
+            runningArgs = args
+            logInfo("VK TURN fallback started")
+        }.onFailure {
+            logWarning("VK TURN fallback start failed: ${it.message}", it)
+        }
+    }
+
+    private fun stopProcess(reason: String) {
+        val coreRunning = runCatching {
+            Clash.isVkTurnRunning()
+        }.getOrDefault(false)
+
+        if (runningArgs == null && !coreRunning)
+            return
+
+        runningArgs = null
+        openedCaptchaUrl = null
+        watchdog?.cancel()
+        watchdog = null
+        cancelCaptchaNotification()
+
+        logInfo("VK TURN fallback stopping: $reason")
+
+        runCatching {
+            Clash.stopVkTurn()
+        }.onFailure {
+            logWarning("VK TURN fallback stop failed: ${it.message}", it)
+        }
+    }
+
+    private fun parseCommandLine(commandLine: String): List<String> {
+        val result = mutableListOf<String>()
+        val current = StringBuilder()
+        var quote: Char? = null
+        var escaping = false
+
+        commandLine.forEach { char ->
+            when {
+                escaping -> {
+                    current.append(char)
+                    escaping = false
+                }
+                char == '\\' && quote != '\'' -> escaping = true
+                quote != null -> {
+                    if (char == quote)
+                        quote = null
+                    else
+                        current.append(char)
+                }
+                char == '\'' || char == '"' -> quote = char
+                char.isWhitespace() -> {
+                    if (current.isNotEmpty()) {
+                        result.add(current.toString())
+                        current.clear()
+                    }
+                }
+                else -> current.append(char)
+            }
+        }
+
+        if (escaping)
+            current.append('\\')
+
+        if (quote != null)
+            throw IllegalArgumentException("Unclosed quote")
+
+        if (current.isNotEmpty())
+            result.add(current.toString())
+
+        return result
+    }
+
+    private fun handleProcessLine(line: String) {
+        if (line.contains("CAPTCHA_URL") ||
+            line.contains("ACTION REQUIRED") ||
+            line.contains("Triggering manual captcha fallback", ignoreCase = true)) {
+            logInfo("VK TURN fallback event received: $line")
+        }
+
+        if (line.contains("Established DTLS connection!", ignoreCase = true) ||
+            line.contains("DTLS connection established", ignoreCase = true)) {
+            scheduleListenWatchdog()
+        }
+
+        if (line.contains("ACTION REQUIRED") ||
+            line.contains("Triggering manual captcha fallback", ignoreCase = true)) {
+            openedCaptchaUrl = null
+        }
+
+        extractCaptchaUrl(line)?.let(::handleCaptchaUrl)
+    }
+
+    private fun scheduleListenWatchdog() {
+        val args = runningArgs ?: return
+        val scope = moduleScope ?: return
+
+        watchdog?.cancel()
+        watchdog = scope.launch {
+            delay(LISTEN_WATCHDOG_DELAY)
+
+            if (runningArgs != args)
+                return@launch
+
+            val coreRunning = runCatching {
+                Clash.isVkTurnRunning()
+            }.getOrDefault(false)
+
+            if (!coreRunning) {
+                logWarning("VK TURN fallback listen watchdog: core is already stopped")
+                runningArgs = null
+                return@launch
+            }
+
+            val availableEndpoints = runCatching {
+                availableEndpointCount()
+            }.getOrElse {
+                logWarning("VK TURN fallback listen watchdog health check failed", it)
+
+                0
+            }
+
+            if (availableEndpoints > 0) {
+                logInfo("VK TURN fallback listen watchdog: availableEndpoints=$availableEndpoints")
+                return@launch
+            }
+
+            logWarning(
+                "VK TURN fallback unhealthy: DTLS established, but health check still has " +
+                        "0 available endpoints after ${LISTEN_WATCHDOG_DELAY / 1000}s; restarting"
+            )
+
+            stopProcess("listen watchdog failed")
+            startProcess(args)
+        }
+    }
+
+    private fun extractCaptchaUrl(line: String): CaptchaUrl? {
+        val raw = CAPTCHA_URL_MARKERS
+            .firstNotNullOfOrNull { marker ->
+                line.substringAfter(marker, missingDelimiterValue = "")
+                    .trim()
+                    .takeIf { it.isNotBlank() }
+            }
+            ?: CAPTCHA_URL_REGEX.find(line)?.value
+            ?.trim()
+            ?: return null
+
+        return normalizeCaptchaUrl(raw)
+    }
+
+    private fun normalizeCaptchaUrl(raw: String): CaptchaUrl? {
+        val uri = runCatching { Uri.parse(raw) }.getOrNull() ?: return null
+
+        if (uri.scheme != "http")
+            return null
+
+        val host = uri.host ?: return null
+        if (!host.equals("localhost", ignoreCase = true) && host != "127.0.0.1")
+            return null
+
+        val builder = uri.buildUpon()
+            .encodedAuthority("127.0.0.1:${uri.port.takeIf { it > 0 } ?: CAPTCHA_PORT}")
+            .clearQuery()
+
+        uri.queryParameterNames
+            .filterNot { it.equals("blank", ignoreCase = true) }
+            .forEach { name ->
+                uri.getQueryParameters(name).forEach { value ->
+                    builder.appendQueryParameter(name, value)
+                }
+            }
+
+        val normalized = builder.build().toString()
+
+        return when (uri.path) {
+            CAPTCHA_PATH -> CaptchaUrl(normalized)
+            "", "/" -> CaptchaUrl(normalized)
+            else -> null
+        }
+    }
+
+    private fun handleCaptchaUrl(captcha: CaptchaUrl) {
+        val url = captcha.url
+
+        if (openedCaptchaUrl == url)
+            return
+
+        if (openedCaptchaUrl != null)
+            logInfo("VK TURN fallback captcha URL updated: $url")
+
+        openedCaptchaUrl = url
+
+        logInfo("VK TURN fallback captcha URL detected: $url")
+        showCaptchaNotification(url)
+    }
+
+    private fun createCaptchaNotificationChannel() {
+        runCatching {
+            notificationManager.createNotificationChannel(
+                NotificationChannelCompat.Builder(
+                    CAPTCHA_CHANNEL_ID,
+                    NotificationManagerCompat.IMPORTANCE_DEFAULT
+                ).setName(service.getText(R.string.vk_turn_captcha_channel)).build()
+            )
+        }.onFailure {
+            logWarning("VK TURN fallback captcha notification channel failed: ${it.message}", it)
+        }
+    }
+
+    private fun showCaptchaNotification(url: String) {
+        val intent = Intent()
+            .setClassName(service.packageName, CAPTCHA_ACTIVITY)
+            .setData(Uri.parse(url))
+            .putExtra(CAPTCHA_ACTIVITY_URL_EXTRA, url)
+            .addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TASK or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP
+            )
+
+        val pendingIntent = PendingIntent.getActivity(
+            service,
+            R.id.nf_vk_turn_captcha,
+            intent,
+            pendingIntentFlags(PendingIntent.FLAG_UPDATE_CURRENT)
+        )
+
+        val notification = NotificationCompat.Builder(service, CAPTCHA_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_logo_service)
+            .setColor(service.getColorCompat(R.color.color_clash))
+            .setContentTitle(service.getText(R.string.vk_turn_captcha_title))
+            .setContentText(service.getText(R.string.vk_turn_captcha_text))
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(false)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .build()
+
+        runCatching {
+            notificationManager.notify(R.id.nf_vk_turn_captcha, notification)
+        }.onSuccess {
+            logInfo("VK TURN fallback captcha notification shown")
+        }.onFailure {
+            logWarning("VK TURN fallback captcha notification failed: ${it.message}", it)
+        }
+    }
+
+    private fun cancelCaptchaNotification() {
+        runCatching {
+            notificationManager.cancel(R.id.nf_vk_turn_captcha)
+        }
+    }
+
+    private fun logInfo(message: String, throwable: Throwable? = null) {
+        Log.i(message, throwable)
+        AppLogWriter.append(service, LogMessage.Level.Info, message, throwable, LOG_SOURCE)
+    }
+
+    private fun logWarning(message: String, throwable: Throwable? = null) {
+        Log.w(message, throwable)
+        AppLogWriter.append(service, LogMessage.Level.Warning, message, throwable, LOG_SOURCE)
+    }
+
+    companion object {
+        private const val LOG_SOURCE = "VK_TURN"
+        private const val CAPTCHA_CHANNEL_ID = "vk_turn_captcha_channel"
+        private const val CAPTCHA_ACTIVITY = "com.github.kr328.clash.VkTurnCaptchaActivity"
+        private const val CAPTCHA_ACTIVITY_URL_EXTRA = "url"
+        private const val CAPTCHA_SUBMITTED_ACTION =
+            "com.github.kr328.clash.action.VK_TURN_CAPTCHA_SUBMITTED"
+        private const val CAPTCHA_PORT = 8765
+        private const val CAPTCHA_PATH = "/not_robot_captcha"
+        private const val INITIAL_DELAY = 5_000L
+        private const val CHECK_INTERVAL = 30_000L
+        private const val LISTEN_WATCHDOG_DELAY = 10_000L
+        private const val HEALTH_CHECK_TIMEOUT = 15_000L
+        private const val UNAVAILABLE_DELAY = 0xffff
+        private const val STOP_THRESHOLD = 2
+        private const val VK_TURN_LOG_PREFIX = "[VK_TURN]"
+
+        private val NON_ENDPOINT_TYPES = setOf(
+            Proxy.Type.Direct,
+            Proxy.Type.Reject,
+            Proxy.Type.RejectDrop,
+            Proxy.Type.Compatible,
+            Proxy.Type.Pass,
+            Proxy.Type.PassRule,
+            Proxy.Type.Dns,
+            Proxy.Type.Unknown,
+        )
+
+        private val CAPTCHA_URL_MARKERS = listOf(
+            "CAPTCHA_URL:",
+            "Open this URL in your browser:",
+            "[Captcha Proxy] Redirecting ROOT to:",
+            "manually open this URL:",
+        )
+        private val CAPTCHA_URL_REGEX = Regex("""http://(?:localhost|127\.0\.0\.1)(?::\d+)?(?:/[^\s]*)?""")
+    }
+
+    private data class CaptchaUrl(
+        val url: String,
+    )
+}

@@ -22,9 +22,9 @@
 
     <application
         android:name=".MainApplication"
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:banner="@mipmap/ic_banner"
-        android:fullBackupContent="@xml/full_backup_content"
+        android:extractNativeLibs="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/application_name"
         android:localeConfig="@xml/locales_config"
@@ -183,6 +183,14 @@
             android:configChanges="uiMode"
             android:exported="false"
             android:label="@string/files" />
+        <activity
+            android:name=".VkTurnCaptchaActivity"
+            android:configChanges="keyboardHidden|orientation|screenSize|uiMode"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:label="@string/vk_turn_fallback"
+            android:launchMode="singleTop"
+            android:taskAffinity="${applicationId}.vkturncaptcha" />
 
         <service
             android:name=".LogcatService"
