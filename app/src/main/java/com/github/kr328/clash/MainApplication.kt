@@ -7,8 +7,12 @@ import android.content.Intent
 import android.content.IntentFilter
 import com.github.kr328.clash.common.Global
 import com.github.kr328.clash.common.compat.currentProcessName
+import com.github.kr328.clash.common.compat.startForegroundServiceCompat
+import com.github.kr328.clash.common.constants.Intents
 import com.github.kr328.clash.common.log.Log
+import com.github.kr328.clash.common.util.componentName
 import com.github.kr328.clash.remote.Remote
+import com.github.kr328.clash.service.ProfileWorker
 import com.github.kr328.clash.service.StatusProvider
 import com.github.kr328.clash.service.util.sendServiceRecreated
 import com.github.kr328.clash.util.clashDir
@@ -36,9 +40,17 @@ class MainApplication : Application() {
         if (processName == packageName) {
             Remote.launch()
             registerScreenRestartReceiver()
+            updateProfilesOnStart()
         } else {
             sendServiceRecreated()
         }
+    }
+
+    private fun updateProfilesOnStart() {
+        val service = Intent(Intents.ACTION_PROFILE_UPDATE_ON_START)
+            .setComponent(ProfileWorker::class.componentName)
+
+        startForegroundServiceCompat(service)
     }
 
     private fun registerScreenRestartReceiver() {

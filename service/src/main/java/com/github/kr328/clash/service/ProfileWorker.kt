@@ -16,6 +16,7 @@ import com.github.kr328.clash.common.id.UndefinedIds
 import com.github.kr328.clash.common.util.setUUID
 import com.github.kr328.clash.common.util.uuid
 import com.github.kr328.clash.service.data.ImportedDao
+import com.github.kr328.clash.service.model.Profile
 import com.github.kr328.clash.service.util.sendProfileUpdateCompleted
 import com.github.kr328.clash.service.util.sendProfileUpdateFailed
 import kotlinx.coroutines.*
@@ -74,9 +75,24 @@ class ProfileWorker : BaseService() {
 
                 jobs.add(job)
             }
+            Intents.ACTION_PROFILE_UPDATE_ON_START -> {
+                val job = launch {
+                    updateAutoProfilesOnStart()
+                }
+
+                jobs.add(job)
+            }
         }
 
         return START_NOT_STICKY
+    }
+
+    private suspend fun updateAutoProfilesOnStart() {
+        ImportedDao().queryAllUUIDs()
+            .mapNotNull { ImportedDao().queryByUUID(it) }
+            .filter { it.type != Profile.Type.File }
+            .filter { it.interval >= TimeUnit.MINUTES.toMillis(15) }
+            .forEach { run(it.uuid) }
     }
 
     private suspend fun run(uuid: UUID) {
