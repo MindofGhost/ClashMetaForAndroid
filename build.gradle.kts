@@ -138,7 +138,7 @@ subprojects {
                 resValue("string", "application_name", "Clash Meta for Android Turn")
 
                 if (isApp && !removeSuffix) {
-                    applicationIdSuffix = ".meta"
+                    applicationIdSuffix = ".turn"
                 }
             }
         }
