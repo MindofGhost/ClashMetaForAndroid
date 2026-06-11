@@ -13,12 +13,21 @@ import com.github.kr328.clash.service.data.SelectionDao
 import com.github.kr328.clash.service.store.ServiceStore
 import com.github.kr328.clash.service.util.importedDir
 import com.github.kr328.clash.service.util.sendProfileLoaded
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
 import java.util.*
 
 class ConfigurationModule(service: Service) : Module<ConfigurationModule.LoadException>(service) {
     data class LoadException(val message: String)
+    private sealed class ReloadEvent {
+        data object Reload : ReloadEvent()
+        data object HealthCheckFinished : ReloadEvent()
+        data class ProfileChanged(val uuid: UUID) : ReloadEvent()
+    }
 
     private val store = ServiceStore(service)
     private val reload = Channel<Unit>(Channel.CONFLATED)
@@ -30,56 +39,77 @@ class ConfigurationModule(service: Service) : Module<ConfigurationModule.LoadExc
         }
 
         var loaded: UUID? = null
+        val logcat = Clash.subscribeLogcat()
+        val healthCheckFinished = Channel<Unit>(Channel.CONFLATED)
 
         reload.trySend(Unit)
 
         try {
-            while (true) {
-                val changed: UUID? = select {
-                    broadcasts.onReceive {
-                        if (it.action == Intents.ACTION_PROFILE_CHANGED)
-                            UUID.fromString(it.getStringExtra(Intents.EXTRA_UUID))
-                        else
-                            null
-                    }
-                    reload.onReceive {
-                        null
+            coroutineScope scope@{
+                val logcatJob = launch {
+                    while (isActive) {
+                        val message = logcat.receive()
+                        if (message.message.startsWith("Finish A Health Checking")) {
+                            healthCheckFinished.trySend(Unit)
+                        }
                     }
                 }
 
-                try {
-                    val current = store.activeProfile
-                        ?: throw NullPointerException("No profile selected")
+                while (true) {
+                    val event = select<ReloadEvent> {
+                        broadcasts.onReceive {
+                            if (it.action == Intents.ACTION_PROFILE_CHANGED)
+                                ReloadEvent.ProfileChanged(UUID.fromString(it.getStringExtra(Intents.EXTRA_UUID)))
+                            else
+                                ReloadEvent.Reload
+                        }
+                        reload.onReceive {
+                            ReloadEvent.Reload
+                        }
+                        healthCheckFinished.onReceive {
+                            ReloadEvent.HealthCheckFinished
+                        }
+                    }
 
-                    if (current == loaded && changed != null && changed != loaded)
-                        continue
+                    try {
+                        if (event is ReloadEvent.HealthCheckFinished) {
+                            persistCurrentSelections(loaded)
+                            continue
+                        }
 
-                    val active = ImportedDao().queryByUUID(current)
-                        ?: throw NullPointerException("No profile selected")
+                        val current = store.activeProfile
+                            ?: throw NullPointerException("No profile selected")
 
-                    Clash.setAgeSecretKey(active.ageSecretKey?.takeIf { it.isNotBlank() })
+                        if (current == loaded && event is ReloadEvent.ProfileChanged && event.uuid != loaded)
+                            continue
 
-                    Clash.load(service.importedDir.resolve(active.uuid.toString())).await()
+                        val active = ImportedDao().queryByUUID(current)
+                            ?: throw NullPointerException("No profile selected")
 
-                    loaded = current
+                        Clash.setAgeSecretKey(active.ageSecretKey?.takeIf { it.isNotBlank() })
 
-                    val remove = SelectionDao().querySelections(active.uuid)
-                        .filterNot { Clash.patchSelector(it.proxy, it.selected) }
-                        .map { it.proxy }
+                        Clash.load(service.importedDir.resolve(active.uuid.toString())).await()
 
-                    SelectionDao().removeSelections(active.uuid, remove)
+                        loaded = current
 
-                    StatusProvider.currentProfile = active.name
+                        restoreSelections(active.uuid)
 
-                    service.sendProfileLoaded(current)
+                        StatusProvider.currentProfile = active.name
 
-                    Log.d("Profile ${active.name} loaded")
-                } catch (e: Exception) {
-                    return enqueueEvent(LoadException(e.message ?: "Unknown"))
+                        service.sendProfileLoaded(current)
+
+                        Log.d("Profile ${active.name} loaded")
+                    } catch (e: Exception) {
+                        logcatJob.cancel()
+                        enqueueEvent(LoadException(e.message ?: "Unknown"))
+                        return@scope
+                    }
                 }
             }
         } finally {
             persistCurrentSelections(loaded)
+            logcat.cancel()
+            healthCheckFinished.cancel()
         }
     }
 
@@ -93,7 +123,6 @@ class ConfigurationModule(service: Service) : Module<ConfigurationModule.LoadExc
                 Proxy.Type.Selector,
                 Proxy.Type.Fallback,
                 Proxy.Type.URLTest,
-                Proxy.Type.LoadBalance,
             )
 
             Clash.queryGroupNames(false)
@@ -111,4 +140,21 @@ class ConfigurationModule(service: Service) : Module<ConfigurationModule.LoadExc
             Log.w("Persist current proxy selections: ${it.message}", it)
         }
     }
+
+    private suspend fun restoreSelections(uuid: UUID) {
+        val dao = SelectionDao()
+        val selections = dao.querySelections(uuid)
+        val remove = mutableListOf<String>()
+
+        selections.forEach { selection ->
+            if (!Clash.patchSelector(selection.proxy, selection.selected)) {
+                remove += selection.proxy
+            }
+        }
+
+        if (remove.isNotEmpty()) {
+            dao.removeSelections(uuid, remove.distinct())
+        }
+    }
+
 }

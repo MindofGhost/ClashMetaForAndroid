@@ -1,13 +1,18 @@
 package com.github.kr328.clash
 
 import android.app.Application
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import com.github.kr328.clash.common.Global
 import com.github.kr328.clash.common.compat.currentProcessName
 import com.github.kr328.clash.common.log.Log
 import com.github.kr328.clash.remote.Remote
+import com.github.kr328.clash.service.StatusProvider
 import com.github.kr328.clash.service.util.sendServiceRecreated
 import com.github.kr328.clash.util.clashDir
+import com.github.kr328.clash.util.startClashService
 import java.io.File
 import java.io.FileOutputStream
 
@@ -30,9 +35,29 @@ class MainApplication : Application() {
 
         if (processName == packageName) {
             Remote.launch()
+            registerScreenRestartReceiver()
         } else {
             sendServiceRecreated()
         }
+    }
+
+    private fun registerScreenRestartReceiver() {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (intent.action != Intent.ACTION_SCREEN_ON)
+                    return
+                if (!StatusProvider.shouldStartClashOnBoot)
+                    return
+
+                runCatching {
+                    context.startClashService()
+                }.onFailure {
+                    Log.w("Restart clash from screen on failed: ${it.message}", it)
+                }
+            }
+        }
+
+        registerReceiver(receiver, IntentFilter(Intent.ACTION_SCREEN_ON))
     }
 
     private fun extractGeoFiles() {
