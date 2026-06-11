@@ -28,6 +28,10 @@ subprojects {
     }
 
     val isApp = name == "app"
+    val baseVersionName = "2.11.30"
+    val turnVersionName = System.getenv("RELEASE_TAG")
+        ?.removePrefix("v")
+        ?.takeIf { it.contains("-turn-") }
 
     apply(plugin = if (isApp) "com.android.application" else "com.android.library")
 
@@ -58,7 +62,7 @@ subprojects {
             minSdk = 21
             targetSdk = 35
 
-            versionName = "2.11.30"
+            versionName = turnVersionName ?: baseVersionName
             versionCode = 211030
 
             resValue("string", "release_name", "v$versionName")
@@ -124,7 +128,7 @@ subprojects {
             create("meta") {
 
                 dimension = flavorDimensionList[0]
-                if (!removeSuffix) {
+                if (!removeSuffix && turnVersionName == null) {
                     versionNameSuffix = ".Meta"
                 }
 
