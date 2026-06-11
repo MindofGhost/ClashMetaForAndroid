@@ -130,13 +130,8 @@ subprojects {
 
                 buildConfigField("boolean", "PREMIUM", "Boolean.parseBoolean(\"false\")")
 
-                if (isApp || project.name == "design") {
-                    resValue("string", "launch_name", "@string/launch_name_meta")
-                    resValue("string", "application_name", "@string/application_name_meta")
-                } else {
-                    resValue("string", "launch_name", "Clash Meta")
-                    resValue("string", "application_name", "Clash Meta for Android")
-                }
+                resValue("string", "launch_name", "Clash Meta Turn")
+                resValue("string", "application_name", "Clash Meta for Android Turn")
 
                 if (isApp && !removeSuffix) {
                     applicationIdSuffix = ".meta"
