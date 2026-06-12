@@ -22,6 +22,8 @@ import (
 	RB "github.com/metacubex/mihomo/rules/bundle"
 )
 
+const fetchTimeout = 25 * time.Second
+
 type Status struct {
 	Action      string   `json:"action"`
 	Args        []string `json:"args"`
@@ -116,18 +118,18 @@ func fetch(url *U.URL, file string) error {
 
 		if err := fetchOnce(url, file); err != nil {
 			last = err
-			continue
+		} else {
+			return nil
 		}
 
-		return nil
-	}
+		if httpUrl {
+			if err := fetchOnceDirect(url, file); err != nil {
+				last = fmt.Errorf("%w; direct retry failed: %v", last, err)
+				continue
+			}
 
-	if httpUrl {
-		if err := fetchOnceDirect(url, file); err != nil {
-			return fmt.Errorf("%w; direct retry failed: %v", last, err)
+			return nil
 		}
-
-		return nil
 	}
 
 	return last
@@ -142,7 +144,7 @@ func fetchOnceDirect(url *U.URL, file string) error {
 }
 
 func fetchOnceWithRoute(url *U.URL, file string, direct bool) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
 	defer cancel()
 
 	var reader io.ReadCloser
