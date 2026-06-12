@@ -1,19 +1,13 @@
 package com.github.kr328.clash
 
-import android.content.ComponentName
-import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
-import android.os.Build
-import android.os.PowerManager
-import android.provider.Settings
-import androidx.core.content.getSystemService
 import com.github.kr328.clash.common.util.componentName
 import com.github.kr328.clash.design.AppSettingsDesign
 import com.github.kr328.clash.design.model.Behavior
 import com.github.kr328.clash.design.store.UiStore.Companion.mainActivityAlias
 import com.github.kr328.clash.service.store.ServiceStore
 import com.github.kr328.clash.util.ApplicationObserver
+import com.github.kr328.clash.util.requestIgnoreBatteryOptimizations
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.selects.select
 
@@ -47,7 +41,7 @@ class AppSettingsActivity : BaseActivity<AppSettingsDesign>(), Behavior {
                             }
                         }
                         AppSettingsDesign.Request.RequestIgnoreBatteryOptimizations -> {
-                            requestIgnoreBatteryOptimizations()
+                            openBatteryOptimizationRequest()
                         }
                     }
                 }
@@ -61,7 +55,14 @@ class AppSettingsActivity : BaseActivity<AppSettingsDesign>(), Behavior {
                 RestartReceiver::class.componentName
             )
 
-            return status == PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+            return when (status) {
+                PackageManager.COMPONENT_ENABLED_STATE_ENABLED -> true
+                PackageManager.COMPONENT_ENABLED_STATE_DISABLED -> false
+                else -> packageManager.getReceiverInfo(
+                    RestartReceiver::class.componentName,
+                    0,
+                ).enabled
+            }
         }
         set(value) {
             val status = if (value)
@@ -89,22 +90,7 @@ class AppSettingsActivity : BaseActivity<AppSettingsDesign>(), Behavior {
         )
     }
 
-    private fun requestIgnoreBatteryOptimizations() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M)
-            return
-
-        val powerManager = getSystemService<PowerManager>()
-        val intent = if (powerManager?.isIgnoringBatteryOptimizations(packageName) == true) {
-            Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-        } else {
-            Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
-                .setData(Uri.parse("package:$packageName"))
-        }
-
-        runCatching {
-            startActivity(intent)
-        }.onFailure {
-            startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
-        }
+    private fun openBatteryOptimizationRequest() {
+        requestIgnoreBatteryOptimizations(openSettingsIfAllowed = true)
     }
 }

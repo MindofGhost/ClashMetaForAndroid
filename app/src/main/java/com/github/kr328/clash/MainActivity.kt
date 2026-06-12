@@ -17,6 +17,9 @@ import com.github.kr328.clash.common.util.intent
 import com.github.kr328.clash.common.util.ticker
 import com.github.kr328.clash.design.MainDesign
 import com.github.kr328.clash.design.ui.ToastDuration
+import com.github.kr328.clash.store.AppStore
+import com.github.kr328.clash.util.isIgnoringBatteryOptimizations
+import com.github.kr328.clash.util.requestIgnoreBatteryOptimizations
 import com.github.kr328.clash.util.startClashService
 import com.github.kr328.clash.util.stopClashService
 import com.github.kr328.clash.util.withClash
@@ -150,6 +153,7 @@ class MainActivity : BaseActivity<MainDesign>() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        requestIgnoreBatteryOptimizationsOnLaunch()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val requestPermissionLauncher =
                 registerForActivityResult(RequestPermission()
@@ -163,6 +167,27 @@ class MainActivity : BaseActivity<MainDesign>() {
             }
         }
         setupShortcuts()
+    }
+
+    private fun requestIgnoreBatteryOptimizationsOnLaunch() {
+        if (batteryOptimizationCheckedThisProcess)
+            return
+
+        batteryOptimizationCheckedThisProcess = true
+
+        val store = AppStore(this)
+        if (isIgnoringBatteryOptimizations()) {
+            store.batteryOptimizationWasIgnored = true
+            store.batteryOptimizationRequestShown = false
+            return
+        }
+
+        if (store.batteryOptimizationRequestShown && !store.batteryOptimizationWasIgnored)
+            return
+
+        store.batteryOptimizationRequestShown = true
+        store.batteryOptimizationWasIgnored = false
+        requestIgnoreBatteryOptimizations()
     }
 
     private fun setupShortcuts() {
@@ -210,5 +235,9 @@ class MainActivity : BaseActivity<MainDesign>() {
             .build()
 
         ShortcutManagerCompat.setDynamicShortcuts(this, listOf(toggle, start, stop))
+    }
+
+    companion object {
+        private var batteryOptimizationCheckedThisProcess = false
     }
 }

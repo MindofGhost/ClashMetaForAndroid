@@ -16,6 +16,16 @@ class AppStore(context: Context) {
         defaultValue = -1,
     )
 
+    var batteryOptimizationRequestShown: Boolean by store.boolean(
+        key = "battery_optimization_request_shown",
+        defaultValue = false,
+    )
+
+    var batteryOptimizationWasIgnored: Boolean by store.boolean(
+        key = "battery_optimization_was_ignored",
+        defaultValue = false,
+    )
+
     companion object {
         private const val FILE_NAME = "app"
     }
