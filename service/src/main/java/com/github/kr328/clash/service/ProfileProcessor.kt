@@ -3,7 +3,6 @@ package com.github.kr328.clash.service
 import android.content.Context
 import android.net.Uri
 import com.github.kr328.clash.common.log.Log
-import com.github.kr328.clash.common.util.hwid
 import com.github.kr328.clash.core.Clash
 import com.github.kr328.clash.service.data.Imported
 import com.github.kr328.clash.service.data.ImportedDao
@@ -12,6 +11,7 @@ import com.github.kr328.clash.service.data.PendingDao
 import com.github.kr328.clash.service.model.Profile
 import com.github.kr328.clash.service.remote.IFetchObserver
 import com.github.kr328.clash.service.store.ServiceStore
+import com.github.kr328.clash.service.util.fetchSubscriptionHeaders
 import com.github.kr328.clash.service.util.importedDir
 import com.github.kr328.clash.service.util.pendingDir
 import com.github.kr328.clash.service.util.processingDir
@@ -20,9 +20,6 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import java.math.BigDecimal
 import java.util.*
 import java.util.concurrent.TimeUnit
 
@@ -69,47 +66,34 @@ object ProfileProcessor {
                         context.processingDir.copyRecursively(context.importedDir.resolve(snapshot.uuid.toString()))
 
                         val old = ImportedDao().queryByUUID(snapshot.uuid)
-                        var upload: Long = 0
-                        var download: Long = 0
-                        var total: Long = 0
-                        var expire: Long = 0
+                        var upload: Long = old?.upload ?: 0
+                        var download: Long = old?.download ?: 0
+                        var total: Long = old?.total ?: 0
+                        var expire: Long = old?.expire ?: 0
+                        var subInfoColor: String? = old?.subInfoColor
+                        var subInfoText: String? = old?.subInfoText
+                        var subInfoButtonText: String? = old?.subInfoButtonText
+                        var subInfoButtonLink: String? = old?.subInfoButtonLink
+                        var subExpire = old?.subExpire ?: false
+                        var subExpireButtonLink: String? = old?.subExpireButtonLink
                         var updateInterval: Long = snapshot.interval
                         if (snapshot?.type == Profile.Type.Url) {
                             if (snapshot.source.startsWith("https://", true)) {
                                 try {
-                                    val client = OkHttpClient()
-                                    val versionName =
-                                        context.packageManager.getPackageInfo(context.packageName, 0).versionName
-                                    val request = Request.Builder().url(snapshot.source)
-                                        .header("User-Agent", "ClashMetaForAndroid/$versionName")
-                                        .header("x-hwid", context.hwid).build()
-
-                                    client.newCall(request).execute().use { response ->
-                                        val userinfo = response.headers["subscription-userinfo"]
-                                        if (response.isSuccessful && userinfo != null) {
-                                            val flags = userinfo.split(";")
-                                            for (flag in flags) {
-                                                val info = flag.split("=")
-                                                when {
-                                                    info[0].contains("upload") && info[1].isNotEmpty() -> upload =
-                                                        BigDecimal(info[1].split('.').first()).longValueExact()
-
-                                                    info[0].contains("download") && info[1].isNotEmpty() -> download =
-                                                        BigDecimal(info[1].split('.').first()).longValueExact()
-
-                                                    info[0].contains("total") && info[1].isNotEmpty() -> total =
-                                                        BigDecimal(info[1].split('.').first()).longValueExact()
-
-                                                    info[0].contains("expire") && info[1].isNotEmpty() -> expire =
-                                                        (info[1].toDouble() * 1000).toLong()
-                                                }
-                                            }
-                                        }
-
-                                        val updateIntervalHeader = response.headers["profile-update-interval"]
-                                        if (old == null && snapshot.interval == 0L && response.isSuccessful && updateIntervalHeader != null) {
-                                            val intervalHours = updateIntervalHeader.toLongOrNull()
-                                            if (intervalHours != null) {
+                                    val headers = context.fetchSubscriptionHeaders(snapshot.source)
+                                    if (headers != null) {
+                                        upload = if (headers.hasUserInfo) headers.upload else old?.upload ?: 0
+                                        download = if (headers.hasUserInfo) headers.download else old?.download ?: 0
+                                        total = if (headers.hasUserInfo) headers.total else old?.total ?: 0
+                                        expire = if (headers.hasUserInfo) headers.expire else old?.expire ?: 0
+                                        subInfoColor = headers.subInfoColor
+                                        subInfoText = headers.subInfoText
+                                        subInfoButtonText = headers.subInfoButtonText
+                                        subInfoButtonLink = headers.subInfoButtonLink
+                                        subExpire = headers.subExpire
+                                        subExpireButtonLink = headers.subExpireButtonLink
+                                        if (old == null && snapshot.interval == 0L) {
+                                            headers.profileUpdateIntervalHours?.let { intervalHours ->
                                                 updateInterval = if (intervalHours > 0) {
                                                     TimeUnit.HOURS.toMillis(intervalHours)
                                                         .coerceAtLeast(TimeUnit.MINUTES.toMillis(15))
@@ -135,7 +119,13 @@ object ProfileProcessor {
                             total,
                             expire,
                             old?.createdAt ?: System.currentTimeMillis(),
-                            ageSecretKey = snapshot.ageSecretKey
+                            ageSecretKey = snapshot.ageSecretKey,
+                            subInfoColor = subInfoColor,
+                            subInfoText = subInfoText,
+                            subInfoButtonText = subInfoButtonText,
+                            subInfoButtonLink = subInfoButtonLink,
+                            subExpire = subExpire,
+                            subExpireButtonLink = subExpireButtonLink,
                         )
                         if (old != null) {
                             ImportedDao().update(new)
@@ -186,9 +176,33 @@ object ProfileProcessor {
 
                 profileLock.withLock {
                     if (ImportedDao().exists(snapshot.uuid)) {
+                        val headers = try {
+                            context.fetchSubscriptionHeaders(snapshot.source)
+                        } catch (e: Exception) {
+                            Log.w("Report fetch subscription-userinfo status: $e", e)
+                            null
+                        }
+                        val updated = if (headers != null) {
+                            snapshot.copy(
+                                upload = if (headers.hasUserInfo) headers.upload else snapshot.upload,
+                                download = if (headers.hasUserInfo) headers.download else snapshot.download,
+                                total = if (headers.hasUserInfo) headers.total else snapshot.total,
+                                expire = if (headers.hasUserInfo) headers.expire else snapshot.expire,
+                                subInfoColor = headers.subInfoColor,
+                                subInfoText = headers.subInfoText,
+                                subInfoButtonText = headers.subInfoButtonText,
+                                subInfoButtonLink = headers.subInfoButtonLink,
+                                subExpire = headers.subExpire,
+                                subExpireButtonLink = headers.subExpireButtonLink,
+                            )
+                        } else {
+                            snapshot
+                        }
+
                         context.importedDir.resolve(snapshot.uuid.toString()).deleteRecursively()
                         context.processingDir.copyRecursively(context.importedDir.resolve(snapshot.uuid.toString()))
 
+                        ImportedDao().update(updated)
                         context.sendProfileChanged(snapshot.uuid)
                     }
                 }

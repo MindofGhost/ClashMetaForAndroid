@@ -2,7 +2,6 @@ package com.github.kr328.clash.service
 
 import android.content.Context
 import com.github.kr328.clash.common.log.Log
-import com.github.kr328.clash.common.util.hwid
 import com.github.kr328.clash.service.data.Database
 import com.github.kr328.clash.service.data.Imported
 import com.github.kr328.clash.service.data.ImportedDao
@@ -13,6 +12,7 @@ import com.github.kr328.clash.service.remote.IFetchObserver
 import com.github.kr328.clash.service.remote.IProfileManager
 import com.github.kr328.clash.service.store.ServiceStore
 import com.github.kr328.clash.service.util.directoryLastModified
+import com.github.kr328.clash.service.util.fetchSubscriptionHeaders
 import com.github.kr328.clash.service.util.generateProfileUUID
 import com.github.kr328.clash.service.util.importedDir
 import com.github.kr328.clash.service.util.pendingDir
@@ -21,10 +21,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import java.io.FileNotFoundException
-import java.math.BigDecimal
 import java.util.*
 
 class ProfileManager(private val context: Context) : IProfileManager,
@@ -144,71 +141,32 @@ class ProfileManager(private val context: Context) : IProfileManager,
 
     suspend fun updateFlow(old: Imported) {
         try {
-            val client = OkHttpClient()
-            val versionName = context.packageManager.getPackageInfo(context.packageName, 0).versionName
-            val request = Request.Builder()
-                .url(old.source)
-                .header("User-Agent", "ClashMetaForAndroid/$versionName")
-                .header("x-hwid", context.hwid)
-                .build()
+            val headers = context.fetchSubscriptionHeaders(old.source) ?: return
 
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful || response.headers["subscription-userinfo"] == null) return
+            val new = Imported(
+                old.uuid,
+                old.name,
+                old.type,
+                old.source,
+                old.interval,
+                if (headers.hasUserInfo) headers.upload else old.upload,
+                if (headers.hasUserInfo) headers.download else old.download,
+                if (headers.hasUserInfo) headers.total else old.total,
+                if (headers.hasUserInfo) headers.expire else old.expire,
+                old.createdAt,
+                ageSecretKey = old.ageSecretKey,
+                subInfoColor = headers.subInfoColor,
+                subInfoText = headers.subInfoText,
+                subInfoButtonText = headers.subInfoButtonText,
+                subInfoButtonLink = headers.subInfoButtonLink,
+                subExpire = headers.subExpire,
+                subExpireButtonLink = headers.subExpireButtonLink,
+            )
 
-                var upload: Long = 0
-                var download: Long = 0
-                var total: Long = 0
-                var expire: Long = 0
+            ImportedDao().update(new)
 
-                val userinfo = response.headers["subscription-userinfo"]
-                if (response.isSuccessful && userinfo != null) {
-
-                    val flags = userinfo.split(";")
-                    for (flag in flags) {
-                        val info = flag.split("=")
-                        when {
-                            info[0].contains("upload") && info[1].isNotEmpty() -> upload =
-                                BigDecimal(info[1].split('.').first()).longValueExact()
-
-                            info[0].contains("download") && info[1].isNotEmpty() -> download =
-                                BigDecimal(info[1].split('.').first()).longValueExact()
-
-                            info[0].contains("total") && info[1].isNotEmpty() ->  total =
-                                BigDecimal(info[1].split('.').first()).longValueExact()
-
-                            info[0].contains("expire") && info[1].isNotEmpty() -> {
-                                if (info[1].isNotEmpty()) {
-                                    expire = (info[1].toDouble()*1000).toLong()
-                                }
-                            }
-                        }
-                    }
-                }
-
-                val new = Imported(
-                    old.uuid,
-                    old.name,
-                    old.type,
-                    old.source,
-                    old.interval,
-                    upload,
-                    download,
-                    total,
-                    expire,
-                    old?.createdAt ?: System.currentTimeMillis(),
-                    ageSecretKey = old.ageSecretKey
-                )
-
-                if (old != null) {
-                    ImportedDao().update(new)
-                } else {
-                    ImportedDao().insert(new)
-                }
-
-                PendingDao().remove(new.uuid)
-                context.sendProfileChanged(new.uuid)
-                // println(response.body!!.string())
-            }
+            PendingDao().remove(new.uuid)
+            context.sendProfileChanged(new.uuid)
 
         } catch (e: Exception) {
             Log.w("Report fetch subscription-userinfo status: $e", e)
@@ -288,6 +246,12 @@ class ProfileManager(private val context: Context) : IProfileManager,
             imported = imported != null,
             pending = pending != null,
             ageSecretKey = if (pending != null) pending.ageSecretKey else imported?.ageSecretKey,
+            subInfoColor = imported?.subInfoColor,
+            subInfoText = imported?.subInfoText,
+            subInfoButtonText = imported?.subInfoButtonText,
+            subInfoButtonLink = imported?.subInfoButtonLink,
+            subExpire = imported?.subExpire == true,
+            subExpireButtonLink = imported?.subExpireButtonLink,
         )
     }
 

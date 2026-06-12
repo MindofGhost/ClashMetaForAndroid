@@ -307,6 +307,12 @@
 
     <string name="invalid_log_file">Invalid log file</string>
     <string name="unable_to_start_vpn">Unable to start VPN component</string>
+    <string name="subscription_expired">Subscription has expired!</string>
+    <string name="renew">Renew</string>
+    <plurals name="subscription_expires_in_days">
+        <item quantity="one">Your subscription expires in %d day.</item>
+        <item quantity="other">Your subscription expires in %d days.</item>
+    </plurals>
 
     <string name="version_updated">App Updated</string>
     <string name="version_updated_tips">The settings have been reseted and the old profiles needs to be saved again.</string>

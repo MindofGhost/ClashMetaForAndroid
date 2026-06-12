@@ -283,6 +283,14 @@
 
     <string name="invalid_log_file">Недопустимый лог файл</string>
     <string name="unable_to_start_vpn">Не удалось запустить компонент VPN</string>
+    <string name="subscription_expired">Подписка истекла!</string>
+    <string name="renew">Продлить</string>
+    <plurals name="subscription_expires_in_days">
+        <item quantity="one">Подписка истекает через %d день.</item>
+        <item quantity="few">Подписка истекает через %d дня.</item>
+        <item quantity="many">Подписка истекает через %d дней.</item>
+        <item quantity="other">Подписка истекает через %d дня.</item>
+    </plurals>
 
     <string name="version_updated">Приложение обновлено</string>
     <string name="version_updated_tips">Настройки были сброшены, старые профили необходимо сохранить повторно</string>

@@ -10,8 +10,20 @@ private val MIGRATION_1_2 = object : Migration(1, 2) {
     }
 }
 
+private val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        database.execSQL("ALTER TABLE imported ADD COLUMN subInfoColor TEXT")
+        database.execSQL("ALTER TABLE imported ADD COLUMN subInfoText TEXT")
+        database.execSQL("ALTER TABLE imported ADD COLUMN subInfoButtonText TEXT")
+        database.execSQL("ALTER TABLE imported ADD COLUMN subInfoButtonLink TEXT")
+        database.execSQL("ALTER TABLE imported ADD COLUMN subExpire INTEGER NOT NULL DEFAULT 0")
+        database.execSQL("ALTER TABLE imported ADD COLUMN subExpireButtonLink TEXT")
+    }
+}
+
 val MIGRATIONS: Array<Migration> = arrayOf(
     MIGRATION_1_2,
+    MIGRATION_2_3,
 )
 
 val LEGACY_MIGRATION = ::migrationFromLegacy

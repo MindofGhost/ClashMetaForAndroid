@@ -1,6 +1,7 @@
 package com.github.kr328.clash.design
 
 import android.content.Context
+import android.graphics.Color
 import android.view.View
 import androidx.appcompat.app.AlertDialog
 import com.github.kr328.clash.core.model.TunnelState
@@ -23,6 +24,7 @@ class MainDesign(context: Context) : Design<MainDesign.Request>(context) {
         OpenSettings,
         OpenHelp,
         OpenAbout,
+        OpenSubscriptionInfoLink,
     }
 
     private val binding = DesignMainBinding
@@ -30,6 +32,16 @@ class MainDesign(context: Context) : Design<MainDesign.Request>(context) {
 
     override val root: View
         get() = binding.root
+
+    private var subscriptionInfoButtonLink: String? = null
+
+    private fun subscriptionInfoColor(color: String?): Int {
+        return when (color) {
+            "red" -> Color.rgb(176, 64, 72)
+            "green" -> Color.rgb(56, 142, 82)
+            else -> context.resolveThemedColor(com.google.android.material.R.attr.colorPrimary)
+        }
+    }
 
     suspend fun setProfileName(name: String?) {
         withContext(Dispatchers.Main) {
@@ -64,6 +76,26 @@ class MainDesign(context: Context) : Design<MainDesign.Request>(context) {
         withContext(Dispatchers.Main) {
             binding.hasProviders = has
         }
+    }
+
+    suspend fun setSubscriptionInfo(
+        text: String?,
+        color: String?,
+        buttonText: String?,
+        buttonLink: String?,
+    ) {
+        withContext(Dispatchers.Main) {
+            subscriptionInfoButtonLink = buttonLink
+            binding.subscriptionInfoText = text
+            binding.subscriptionInfoButtonText = buttonText
+            binding.subscriptionInfoButtonVisible = !buttonText.isNullOrBlank() && !buttonLink.isNullOrBlank()
+            binding.subscriptionInfoVisible = !text.isNullOrBlank()
+            binding.subscriptionInfoColor = subscriptionInfoColor(color)
+        }
+    }
+
+    fun subscriptionInfoButtonLink(): String? {
+        return subscriptionInfoButtonLink
     }
 
     suspend fun showAbout(versionName: String) {

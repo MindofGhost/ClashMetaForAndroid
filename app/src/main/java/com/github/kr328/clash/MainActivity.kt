@@ -2,6 +2,7 @@ package com.github.kr328.clash
 
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.PersistableBundle
@@ -17,6 +18,7 @@ import com.github.kr328.clash.common.util.intent
 import com.github.kr328.clash.common.util.ticker
 import com.github.kr328.clash.design.MainDesign
 import com.github.kr328.clash.design.ui.ToastDuration
+import com.github.kr328.clash.service.model.Profile
 import com.github.kr328.clash.store.AppStore
 import com.github.kr328.clash.util.isIgnoringBatteryOptimizations
 import com.github.kr328.clash.util.requestIgnoreBatteryOptimizations
@@ -29,6 +31,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withContext
+import kotlin.math.ceil
 import java.util.concurrent.TimeUnit
 import com.github.kr328.clash.design.R as DesignR
 
@@ -80,6 +83,8 @@ class MainActivity : BaseActivity<MainDesign>() {
                             startActivity(HelpActivity::class.intent)
                         MainDesign.Request.OpenAbout ->
                             design.showAbout(queryAppVersionName())
+                        MainDesign.Request.OpenSubscriptionInfoLink ->
+                            openSubscriptionInfoLink(design)
                     }
                 }
                 if (clashRunning) {
@@ -104,9 +109,9 @@ class MainActivity : BaseActivity<MainDesign>() {
         setMode(state.mode)
         setHasProviders(providers.isNotEmpty())
 
-        withProfile {
-            setProfileName(queryActive()?.name)
-        }
+        val activeProfile = withProfile { queryActive() }
+        setProfileName(activeProfile?.name)
+        setSubscriptionInfo(activeProfile.toSubscriptionInfo())
     }
 
     private suspend fun MainDesign.fetchTraffic() {
@@ -150,6 +155,71 @@ class MainActivity : BaseActivity<MainDesign>() {
             packageManager.getPackageInfo(packageName, 0).versionName + "\n" + Bridge.nativeCoreVersion().replace("_", "-")
         }
     }
+
+    private fun openSubscriptionInfoLink(design: MainDesign) {
+        val link = design.subscriptionInfoButtonLink() ?: return
+
+        runCatching {
+            startActivity(Intent(Intent.ACTION_VIEW).setData(Uri.parse(link)))
+        }
+    }
+
+    private fun Profile?.toSubscriptionInfo(): SubscriptionInfoView? {
+        if (this == null)
+            return null
+
+        expireMessage()?.let {
+            return it
+        }
+
+        val text = subInfoText?.takeIf { it.isNotBlank() && it != "0" } ?: return null
+
+        return SubscriptionInfoView(
+            text = text,
+            color = subInfoColor ?: "blue",
+            buttonText = subInfoButtonText,
+            buttonLink = subInfoButtonLink,
+        )
+    }
+
+    private fun Profile.expireMessage(): SubscriptionInfoView? {
+        if (!subExpire || expire <= 0)
+            return null
+
+        val remaining = expire - System.currentTimeMillis()
+        val text = if (remaining <= 0) {
+            getString(DesignR.string.subscription_expired)
+        } else {
+            val days = ceil(remaining.toDouble() / TimeUnit.DAYS.toMillis(1)).toLong()
+            if (days > 3)
+                return null
+
+            resources.getQuantityString(DesignR.plurals.subscription_expires_in_days, days.toInt(), days)
+        }
+
+        return SubscriptionInfoView(
+            text = text,
+            color = "red",
+            buttonText = getString(DesignR.string.renew),
+            buttonLink = subExpireButtonLink,
+        )
+    }
+
+    private suspend fun MainDesign.setSubscriptionInfo(info: SubscriptionInfoView?) {
+        setSubscriptionInfo(
+            text = info?.text,
+            color = info?.color,
+            buttonText = info?.buttonText,
+            buttonLink = info?.buttonLink,
+        )
+    }
+
+    private data class SubscriptionInfoView(
+        val text: String,
+        val color: String,
+        val buttonText: String?,
+        val buttonLink: String?,
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

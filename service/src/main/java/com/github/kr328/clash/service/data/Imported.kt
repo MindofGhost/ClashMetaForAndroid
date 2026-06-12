@@ -20,4 +20,10 @@ data class Imported(
     @ColumnInfo(name = "expire") val expire: Long,
     @ColumnInfo(name = "createdAt") val createdAt: Long,
     @ColumnInfo(name = "ageSecretKey") val ageSecretKey: String? = null,
+    @ColumnInfo(name = "subInfoColor") val subInfoColor: String? = null,
+    @ColumnInfo(name = "subInfoText") val subInfoText: String? = null,
+    @ColumnInfo(name = "subInfoButtonText") val subInfoButtonText: String? = null,
+    @ColumnInfo(name = "subInfoButtonLink") val subInfoButtonLink: String? = null,
+    @ColumnInfo(name = "subExpire") val subExpire: Boolean = false,
+    @ColumnInfo(name = "subExpireButtonLink") val subExpireButtonLink: String? = null,
 )

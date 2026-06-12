@@ -26,6 +26,21 @@
         <variable
             name="hasProviders"
             type="boolean" />
+        <variable
+            name="subscriptionInfoVisible"
+            type="boolean" />
+        <variable
+            name="subscriptionInfoText"
+            type="String" />
+        <variable
+            name="subscriptionInfoButtonVisible"
+            type="boolean" />
+        <variable
+            name="subscriptionInfoButtonText"
+            type="String" />
+        <variable
+            name="subscriptionInfoColor"
+            type="int" />
 
         <import type="android.view.View" />
         <import type="com.github.kr328.clash.design.MainDesign.Request" />
@@ -87,6 +102,47 @@
                     app:icon="@{clashRunning ? @drawable/ic_outline_check_circle : @drawable/ic_outline_not_interested}"
                     app:subtext="@{clashRunning ? @string/format_traffic_forwarded(forwarded) : @string/tap_to_start}"
                     app:text="@{clashRunning ? @string/running : @string/stopped}" />
+
+                <com.google.android.material.card.MaterialCardView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginVertical="@dimen/main_card_margin_vertical"
+                    android:visibility="@{subscriptionInfoVisible ? View.VISIBLE : View.GONE}"
+                    app:cardBackgroundColor="@{subscriptionInfoColor}"
+                    app:cardCornerRadius="@dimen/large_action_card_radius"
+                    app:cardElevation="@dimen/large_action_card_elevation">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:minHeight="@dimen/large_action_card_min_height"
+                        android:orientation="horizontal"
+                        android:paddingStart="@dimen/large_item_header_margin_horizontal"
+                        android:paddingTop="@dimen/large_item_padding_vertical"
+                        android:paddingEnd="@dimen/large_item_header_margin_horizontal"
+                        android:paddingBottom="@dimen/large_item_padding_vertical">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@{subscriptionInfoText}"
+                            android:textAppearance="@style/TextAppearance.MaterialComponents.Body1"
+                            android:textColor="@android:color/white" />
+
+                        <Button
+                            style="@style/Widget.MaterialComponents.Button.TextButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="@dimen/item_midden_margin"
+                            android:minWidth="0dp"
+                            android:onClick="@{() -> self.request(Request.OpenSubscriptionInfoLink)}"
+                            android:text="@{subscriptionInfoButtonText}"
+                            android:textColor="@android:color/white"
+                            android:visibility="@{subscriptionInfoButtonVisible ? View.VISIBLE : View.GONE}" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
 
                 <com.github.kr328.clash.design.view.LargeActionCard
                     android:layout_width="match_parent"
