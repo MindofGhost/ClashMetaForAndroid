@@ -18,6 +18,7 @@ import com.github.kr328.clash.common.util.intent
 import com.github.kr328.clash.common.util.ticker
 import com.github.kr328.clash.design.MainDesign
 import com.github.kr328.clash.design.ui.ToastDuration
+import com.github.kr328.clash.remote.Remote
 import com.github.kr328.clash.service.model.Profile
 import com.github.kr328.clash.store.AppStore
 import com.github.kr328.clash.util.isIgnoringBatteryOptimizations
@@ -44,6 +45,7 @@ class MainActivity : BaseActivity<MainDesign>() {
         design.fetch()
 
         val ticker = ticker(TimeUnit.SECONDS.toMillis(1))
+        val profileUpdateTicker = ticker(TimeUnit.MINUTES.toMillis(1))
 
         while (isActive) {
             select<Unit> {
@@ -91,6 +93,9 @@ class MainActivity : BaseActivity<MainDesign>() {
                     ticker.onReceive {
                         design.fetchTraffic()
                     }
+                }
+                profileUpdateTicker.onReceive {
+                    Remote.requestStaleProfileUpdates()
                 }
             }
         }

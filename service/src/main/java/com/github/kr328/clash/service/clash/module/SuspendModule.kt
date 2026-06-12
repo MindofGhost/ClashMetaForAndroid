@@ -6,6 +6,7 @@ import android.os.PowerManager
 import androidx.core.content.getSystemService
 import com.github.kr328.clash.common.log.Log
 import com.github.kr328.clash.core.Clash
+import com.github.kr328.clash.service.ProfileWorker
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withContext
@@ -26,6 +27,7 @@ class SuspendModule(service: Service) : Module<Unit>(service) {
                 when (screenToggle.receive().action) {
                     Intent.ACTION_SCREEN_ON -> {
                         Clash.suspendCore(false)
+                        ProfileWorker.requestUpdateStale(service)
 
                         Log.d("Clash resumed")
                     }

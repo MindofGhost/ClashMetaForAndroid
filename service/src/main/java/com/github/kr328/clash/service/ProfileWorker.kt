@@ -10,13 +10,17 @@ import androidx.core.app.NotificationManagerCompat
 import com.github.kr328.clash.common.compat.getColorCompat
 import com.github.kr328.clash.common.compat.pendingIntentFlags
 import com.github.kr328.clash.common.compat.startForegroundCompat
+import com.github.kr328.clash.common.compat.startForegroundServiceCompat
 import com.github.kr328.clash.common.constants.Components
 import com.github.kr328.clash.common.constants.Intents
 import com.github.kr328.clash.common.id.UndefinedIds
+import com.github.kr328.clash.common.log.Log
+import com.github.kr328.clash.common.util.componentName
 import com.github.kr328.clash.common.util.setUUID
 import com.github.kr328.clash.common.util.uuid
 import com.github.kr328.clash.service.data.ImportedDao
 import com.github.kr328.clash.service.model.Profile
+import com.github.kr328.clash.service.util.importedDir
 import com.github.kr328.clash.service.util.sendProfileUpdateCompleted
 import com.github.kr328.clash.service.util.sendProfileUpdateFailed
 import kotlinx.coroutines.*
@@ -82,6 +86,13 @@ class ProfileWorker : BaseService() {
 
                 jobs.add(job)
             }
+            Intents.ACTION_PROFILE_UPDATE_STALE -> {
+                val job = launch {
+                    updateStaleProfiles()
+                }
+
+                jobs.add(job)
+            }
         }
 
         return START_NOT_STICKY
@@ -95,6 +106,30 @@ class ProfileWorker : BaseService() {
             .forEach { run(it.uuid) }
     }
 
+    private suspend fun updateStaleProfiles() {
+        val current = System.currentTimeMillis()
+
+        ImportedDao().queryAllUUIDs()
+            .mapNotNull { ImportedDao().queryByUUID(it) }
+            .filter { it.type != Profile.Type.File }
+            .filter { it.interval >= TimeUnit.MINUTES.toMillis(15) }
+            .filter {
+                if (failedUpdateProfiles.contains(it.uuid))
+                    return@filter true
+
+                val last = importedDir
+                    .resolve(it.uuid.toString())
+                    .resolve("config.yaml")
+                    .lastModified()
+
+                last > 0 && current - last >= it.interval
+            }
+            .forEach {
+                Log.i("Update stale profile: ${it.name}")
+                run(it.uuid)
+            }
+    }
+
     private suspend fun run(uuid: UUID) {
         val imported = ImportedDao().queryByUUID(uuid) ?: return
 
@@ -104,11 +139,14 @@ class ProfileWorker : BaseService() {
             }
 
             completed(imported.uuid)
+            failedUpdateProfiles.remove(imported.uuid)
 
             ImportedDao().queryByUUID(imported.uuid)?.let {
                 ProfileReceiver.scheduleNext(this, it)
             }
         } catch (e: Exception) {
+            failedUpdateProfiles.add(imported.uuid)
+
             ImportedDao().queryByUUID(imported.uuid)?.let {
                 ProfileReceiver.scheduleRetry(this, it)
             }
@@ -236,10 +274,31 @@ class ProfileWorker : BaseService() {
         private const val STATUS_CHANNEL = "profile_status_channel"
         private const val RESULT_CHANNEL = "profile_result_channel"
         private const val MAX_UPDATE_ATTEMPTS = 3
+        private val STALE_UPDATE_REQUEST_INTERVAL = TimeUnit.MINUTES.toMillis(1)
+        @Volatile
+        private var lastStaleUpdateRequest = 0L
+        private val failedUpdateProfiles = Collections.synchronizedSet(mutableSetOf<UUID>())
         private val RETRY_DELAYS = longArrayOf(
             TimeUnit.SECONDS.toMillis(10),
             TimeUnit.SECONDS.toMillis(30),
         )
+
+        fun requestUpdateStale(context: android.content.Context) {
+            val current = System.currentTimeMillis()
+            if (current - lastStaleUpdateRequest < STALE_UPDATE_REQUEST_INTERVAL)
+                return
+
+            lastStaleUpdateRequest = current
+
+            val service = Intent(Intents.ACTION_PROFILE_UPDATE_STALE)
+                .setComponent(ProfileWorker::class.componentName)
+
+            runCatching {
+                context.startForegroundServiceCompat(service)
+            }.onFailure {
+                Log.w("Request stale profile update failed: ${it.message}", it)
+            }
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder {

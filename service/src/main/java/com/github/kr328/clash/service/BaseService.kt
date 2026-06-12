@@ -6,6 +6,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 
 abstract class BaseService : Service(), CoroutineScope by CoroutineScope(Dispatchers.Default) {
+    override fun onCreate() {
+        super.onCreate()
+
+        if (this !is ProfileWorker) {
+            ProfileWorker.requestUpdateStale(this)
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
 

@@ -58,6 +58,9 @@ class MainApplication : Application() {
             override fun onReceive(context: Context, intent: Intent) {
                 if (intent.action != Intent.ACTION_SCREEN_ON)
                     return
+
+                ProfileWorker.requestUpdateStale(context)
+
                 if (!StatusProvider.shouldStartClashOnBoot)
                     return
 

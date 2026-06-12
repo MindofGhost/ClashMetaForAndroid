@@ -7,6 +7,7 @@ import com.github.kr328.clash.AppCrashedActivity
 import com.github.kr328.clash.common.Global
 import com.github.kr328.clash.common.log.Log
 import com.github.kr328.clash.common.util.intent
+import com.github.kr328.clash.service.ProfileWorker
 import com.github.kr328.clash.store.AppStore
 import com.github.kr328.clash.util.ApplicationObserver
 import com.github.kr328.clash.util.verifyApk
@@ -35,6 +36,7 @@ object Remote {
                 Log.d("App becomes visible")
                 service.bind()
                 broadcasts.register()
+                requestStaleProfileUpdates()
             }
             else {
                 Log.d("App becomes invisible")
@@ -46,6 +48,10 @@ object Remote {
         Global.launch(Dispatchers.IO) {
             verifyApp()
         }
+    }
+
+    fun requestStaleProfileUpdates() {
+        ProfileWorker.requestUpdateStale(Global.application)
     }
 
     private suspend fun verifyApp() {

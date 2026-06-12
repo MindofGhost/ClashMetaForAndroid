@@ -6,6 +6,7 @@ import android.os.Build
 import androidx.core.content.getSystemService
 import com.github.kr328.clash.common.log.Log
 import com.github.kr328.clash.core.Clash
+import com.github.kr328.clash.service.ProfileWorker
 import com.github.kr328.clash.service.util.asSocketAddressText
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
@@ -42,6 +43,7 @@ class NetworkObserveModule(service: Service) : Module<Network>(service) {
         override fun onAvailable(network: Network) {
             Log.i("NetworkObserve onAvailable network=$network")
             networkInfos[network] = NetworkInfo()
+            ProfileWorker.requestUpdateStale(service)
         }
 
         override fun onLosing(network: Network, maxMsToLive: Int) {
@@ -64,6 +66,7 @@ class NetworkObserveModule(service: Service) : Module<Network>(service) {
             Log.i("NetworkObserve onLinkPropertiesChanged network=$network $linkProperties")
             networkInfos[network]?.dnsList = linkProperties.dnsServers
             notifyDnsChange()
+            ProfileWorker.requestUpdateStale(service)
 
             networks.trySend(network)
         }
