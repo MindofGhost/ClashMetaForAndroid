@@ -79,6 +79,11 @@ func healthCheckAll() {
 	tunnel.HealthCheckAll()
 }
 
+//export closeAllConnections
+func closeAllConnections() {
+	tunnel.CloseAllConnections()
+}
+
 //export patchSelector
 func patchSelector(selector, name C.c_string) C.int {
 	s := C.GoString(selector)

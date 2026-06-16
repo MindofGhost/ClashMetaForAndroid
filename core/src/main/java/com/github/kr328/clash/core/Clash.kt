@@ -151,6 +151,10 @@ object Clash {
         Bridge.nativeHealthCheckAll()
     }
 
+    fun closeAllConnections() {
+        Bridge.nativeCloseAllConnections()
+    }
+
     fun patchSelector(selector: String, name: String): Boolean {
         return Bridge.nativePatchSelector(selector, name)
     }

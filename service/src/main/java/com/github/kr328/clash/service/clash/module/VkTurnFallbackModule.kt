@@ -37,6 +37,7 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
     private var resumeWatchdog: Job? = null
     private var runningArgs: List<String>? = null
     private var openedCaptchaUrl: String? = null
+    private var lastAvailableEndpointCount: Int? = null
     private var moduleScope: CoroutineScope? = null
     private val notificationManager = NotificationManagerCompat.from(service)
 
@@ -123,13 +124,18 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
                     logInfo("VK TURN fallback arguments are absent")
                     stopProcess("fallback configuration is absent")
                 } else {
+                    var healthCheckSucceeded = true
                     val availableEndpoints = runCatching {
                         availableEndpointCount()
                     }.getOrElse {
                         logWarning("VK TURN fallback health check failed", it)
+                        healthCheckSucceeded = false
 
-                            STOP_THRESHOLD
-                        }
+                        STOP_THRESHOLD
+                    }
+
+                    if (healthCheckSucceeded)
+                        noteEndpointAvailability(availableEndpoints, "periodic health check")
 
                     logInfo(
                         "VK TURN fallback check: availableEndpoints=$availableEndpoints " +
@@ -175,6 +181,7 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         logWarning("VK TURN fallback expected to run, but core is stopped after $reason; restarting")
         runningArgs = null
         openedCaptchaUrl = null
+        lastAvailableEndpointCount = 0
         watchdog?.cancel()
         watchdog = null
         cancelCaptchaNotification()
@@ -212,6 +219,7 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
 
             if (availableEndpoints > 0) {
                 logInfo("VK TURN fallback health watchdog after $reason: availableEndpoints=$availableEndpoints")
+                noteEndpointAvailability(availableEndpoints, "health watchdog after $reason")
                 return@launch
             }
 
@@ -314,6 +322,7 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
             logWarning("VK TURN fallback state was running, but core is stopped; restarting")
             runningArgs = null
             openedCaptchaUrl = null
+            lastAvailableEndpointCount = 0
             watchdog?.cancel()
             watchdog = null
             cancelCaptchaNotification()
@@ -339,6 +348,7 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
 
         runningArgs = null
         openedCaptchaUrl = null
+        lastAvailableEndpointCount = 0
         cancelCaptchaNotification()
 
         runCatching {
@@ -360,6 +370,7 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
 
         runningArgs = null
         openedCaptchaUrl = null
+        lastAvailableEndpointCount = null
         watchdog?.cancel()
         watchdog = null
         resumeWatchdog?.cancel()
@@ -415,6 +426,25 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
             result.add(current.toString())
 
         return result
+    }
+
+    private fun noteEndpointAvailability(availableEndpoints: Int, reason: String) {
+        val previous = lastAvailableEndpointCount
+        lastAvailableEndpointCount = availableEndpoints
+
+        if (previous != 0 || availableEndpoints <= 0)
+            return
+
+        logInfo(
+            "VK TURN fallback endpoints recovered after $reason; " +
+                    "closing active Clash connections"
+        )
+
+        runCatching {
+            Clash.closeAllConnections()
+        }.onFailure {
+            logWarning("VK TURN fallback failed to close active connections: ${it.message}", it)
+        }
     }
 
     private fun handleProcessLine(line: String) {
