@@ -34,6 +34,7 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
 
     private var logcat: Job? = null
     private var watchdog: Job? = null
+    private var resumeWatchdog: Job? = null
     private var runningArgs: List<String>? = null
     private var openedCaptchaUrl: String? = null
     private var moduleScope: CoroutineScope? = null
@@ -56,12 +57,29 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         val captchaSubmitted = receiveBroadcast(false) {
             addAction(CAPTCHA_SUBMITTED_ACTION)
         }
+        val screenToggle = receiveBroadcast(false) {
+            addAction(Intent.ACTION_SCREEN_ON)
+        }
 
         launch {
             for (ignored in captchaSubmitted) {
                 openedCaptchaUrl = null
                 logInfo("VK TURN fallback captcha submitted")
                 cancelCaptchaNotification()
+            }
+        }
+
+        launch {
+            for (ignored in screenToggle) {
+                restartIfExpectedButStopped("screen on")
+                scheduleHealthWatchdog("screen on")
+            }
+        }
+
+        launch {
+            while (isActive) {
+                delay(RUNNING_WATCHDOG_INTERVAL)
+                restartIfExpectedButStopped("running watchdog")
             }
         }
 
@@ -138,7 +156,71 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
             logcat = null
             watchdog?.cancel()
             watchdog = null
+            resumeWatchdog?.cancel()
+            resumeWatchdog = null
             moduleScope = null
+        }
+    }
+
+    private fun restartIfExpectedButStopped(reason: String) {
+        val args = runningArgs ?: return
+
+        val coreRunning = runCatching {
+            Clash.isVkTurnRunning()
+        }.getOrDefault(false)
+
+        if (coreRunning)
+            return
+
+        logWarning("VK TURN fallback expected to run, but core is stopped after $reason; restarting")
+        runningArgs = null
+        openedCaptchaUrl = null
+        watchdog?.cancel()
+        watchdog = null
+        cancelCaptchaNotification()
+        startProcess(args)
+    }
+
+    private fun scheduleHealthWatchdog(reason: String) {
+        val args = runningArgs ?: return
+        val scope = moduleScope ?: return
+
+        resumeWatchdog?.cancel()
+        resumeWatchdog = scope.launch {
+            delay(HEALTH_WATCHDOG_DELAY)
+
+            if (runningArgs != args)
+                return@launch
+
+            val coreRunning = runCatching {
+                Clash.isVkTurnRunning()
+            }.getOrDefault(false)
+
+            if (!coreRunning) {
+                logWarning("VK TURN fallback health watchdog after $reason: core is stopped; restarting")
+                restartProcess(args, "health watchdog after $reason: core stopped")
+                return@launch
+            }
+
+            val availableEndpoints = runCatching {
+                availableEndpointCount()
+            }.getOrElse {
+                logWarning("VK TURN fallback health watchdog after $reason health check failed", it)
+
+                0
+            }
+
+            if (availableEndpoints > 0) {
+                logInfo("VK TURN fallback health watchdog after $reason: availableEndpoints=$availableEndpoints")
+                return@launch
+            }
+
+            logWarning(
+                "VK TURN fallback health watchdog after $reason: no available endpoints " +
+                        "after ${HEALTH_WATCHDOG_DELAY / 1000}s; restarting"
+            )
+
+            restartProcess(args, "health watchdog after $reason failed")
         }
     }
 
@@ -252,6 +334,22 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         }
     }
 
+    private fun restartProcess(args: List<String>, reason: String) {
+        logInfo("VK TURN fallback restarting: $reason")
+
+        runningArgs = null
+        openedCaptchaUrl = null
+        cancelCaptchaNotification()
+
+        runCatching {
+            Clash.stopVkTurn()
+        }.onFailure {
+            logWarning("VK TURN fallback stop before restart failed: ${it.message}", it)
+        }
+
+        startProcess(args)
+    }
+
     private fun stopProcess(reason: String) {
         val coreRunning = runCatching {
             Clash.isVkTurnRunning()
@@ -264,6 +362,8 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         openedCaptchaUrl = null
         watchdog?.cancel()
         watchdog = null
+        resumeWatchdog?.cancel()
+        resumeWatchdog = null
         cancelCaptchaNotification()
 
         logInfo("VK TURN fallback stopping: $reason")
@@ -326,7 +426,7 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
 
         if (line.contains("Established DTLS connection!", ignoreCase = true) ||
             line.contains("DTLS connection established", ignoreCase = true)) {
-            scheduleListenWatchdog()
+            logInfo("VK TURN fallback DTLS established")
         }
 
         if (line.contains("ACTION REQUIRED") ||
@@ -335,50 +435,6 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         }
 
         extractCaptchaUrl(line)?.let(::handleCaptchaUrl)
-    }
-
-    private fun scheduleListenWatchdog() {
-        val args = runningArgs ?: return
-        val scope = moduleScope ?: return
-
-        watchdog?.cancel()
-        watchdog = scope.launch {
-            delay(LISTEN_WATCHDOG_DELAY)
-
-            if (runningArgs != args)
-                return@launch
-
-            val coreRunning = runCatching {
-                Clash.isVkTurnRunning()
-            }.getOrDefault(false)
-
-            if (!coreRunning) {
-                logWarning("VK TURN fallback listen watchdog: core is already stopped")
-                runningArgs = null
-                return@launch
-            }
-
-            val availableEndpoints = runCatching {
-                availableEndpointCount()
-            }.getOrElse {
-                logWarning("VK TURN fallback listen watchdog health check failed", it)
-
-                0
-            }
-
-            if (availableEndpoints > 0) {
-                logInfo("VK TURN fallback listen watchdog: availableEndpoints=$availableEndpoints")
-                return@launch
-            }
-
-            logWarning(
-                "VK TURN fallback unhealthy: DTLS established, but health check still has " +
-                        "0 available endpoints after ${LISTEN_WATCHDOG_DELAY / 1000}s; restarting"
-            )
-
-            stopProcess("listen watchdog failed")
-            startProcess(args)
-        }
     }
 
     private fun extractCaptchaUrl(line: String): CaptchaUrl? {
@@ -519,8 +575,9 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         private const val CAPTCHA_PATH = "/not_robot_captcha"
         private const val INITIAL_DELAY = 5_000L
         private const val CHECK_INTERVAL = 30_000L
-        private const val LISTEN_WATCHDOG_DELAY = 10_000L
-        private const val HEALTH_CHECK_TIMEOUT = 15_000L
+        private const val RUNNING_WATCHDOG_INTERVAL = 15_000L
+        private const val HEALTH_WATCHDOG_DELAY = 20_000L
+        private const val HEALTH_CHECK_TIMEOUT = 20_000L
         private const val UNAVAILABLE_DELAY = 0xffff
         private const val STOP_THRESHOLD = 2
         private const val VK_TURN_LOG_PREFIX = "[VK_TURN]"
