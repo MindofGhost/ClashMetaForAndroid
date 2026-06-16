@@ -9,6 +9,7 @@ import java.net.URLDecoder
 import java.math.BigDecimal
 import java.nio.charset.StandardCharsets
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 data class SubscriptionHeaders(
     val hasUserInfo: Boolean = false,
@@ -29,7 +30,11 @@ suspend fun Context.fetchSubscriptionHeaders(source: String): SubscriptionHeader
     if (!source.startsWith("https://", true))
         return null
 
-    val client = OkHttpClient()
+    val client = OkHttpClient.Builder()
+        .callTimeout(20, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
+        .build()
     val versionName = packageManager.getPackageInfo(packageName, 0).versionName
     val request = Request.Builder()
         .url(source)

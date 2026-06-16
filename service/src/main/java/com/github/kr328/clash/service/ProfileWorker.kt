@@ -44,7 +44,7 @@ class ProfileWorker : BaseService() {
             delay(TimeUnit.SECONDS.toMillis(10))
 
             while (true) {
-                jobs.removeFirstOrNull()?.join() ?: break
+                pollJob()?.join() ?: break
             }
 
             stopSelf()
@@ -64,10 +64,10 @@ class ProfileWorker : BaseService() {
             Intents.ACTION_PROFILE_REQUEST_UPDATE -> {
                 intent.uuid?.also {
                     val job = launch {
-                        run(it)
+                        runDeduplicated(it, "request")
                     }
 
-                    jobs.add(job)
+                    enqueueJob(job)
                 }
             }
             Intents.ACTION_PROFILE_SCHEDULE_UPDATES -> {
@@ -77,25 +77,37 @@ class ProfileWorker : BaseService() {
                     delay(TimeUnit.SECONDS.toMillis(30))
                 }
 
-                jobs.add(job)
+                enqueueJob(job)
             }
             Intents.ACTION_PROFILE_UPDATE_ON_START -> {
                 val job = launch {
                     updateAutoProfilesOnStart()
                 }
 
-                jobs.add(job)
+                enqueueJob(job)
             }
             Intents.ACTION_PROFILE_UPDATE_STALE -> {
                 val job = launch {
                     updateStaleProfiles()
                 }
 
-                jobs.add(job)
+                enqueueJob(job)
             }
         }
 
         return START_NOT_STICKY
+    }
+
+    private fun enqueueJob(job: Job) {
+        synchronized(jobs) {
+            jobs.add(job)
+        }
+    }
+
+    private fun pollJob(): Job? {
+        return synchronized(jobs) {
+            jobs.removeFirstOrNull()
+        }
     }
 
     private suspend fun updateAutoProfilesOnStart() {
@@ -103,7 +115,7 @@ class ProfileWorker : BaseService() {
             .mapNotNull { ImportedDao().queryByUUID(it) }
             .filter { it.type != Profile.Type.File }
             .filter { it.interval >= TimeUnit.MINUTES.toMillis(15) }
-            .forEach { run(it.uuid) }
+            .forEach { runDeduplicated(it.uuid, "startup") }
     }
 
     private suspend fun updateStaleProfiles() {
@@ -126,8 +138,21 @@ class ProfileWorker : BaseService() {
             }
             .forEach {
                 Log.i("Update stale profile: ${it.name}")
-                run(it.uuid)
+                runDeduplicated(it.uuid, "stale")
             }
+    }
+
+    private suspend fun runDeduplicated(uuid: UUID, reason: String) {
+        if (!pendingProfileUpdates.add(uuid)) {
+            Log.i("Skip duplicate profile update: $uuid reason=$reason")
+            return
+        }
+
+        try {
+            run(uuid)
+        } finally {
+            pendingProfileUpdates.remove(uuid)
+        }
     }
 
     private suspend fun run(uuid: UUID) {
@@ -160,8 +185,19 @@ class ProfileWorker : BaseService() {
 
         repeat(MAX_UPDATE_ATTEMPTS) { attempt ->
             try {
-                ProfileProcessor.update(this, uuid, null)
+                withTimeout(UPDATE_ATTEMPT_TIMEOUT) {
+                    ProfileProcessor.update(this@ProfileWorker, uuid, null)
+                }
                 return
+            } catch (e: TimeoutCancellationException) {
+                last = IllegalStateException(
+                    "Profile update timed out after ${TimeUnit.MILLISECONDS.toMinutes(UPDATE_ATTEMPT_TIMEOUT)} minutes",
+                    e
+                )
+
+                if (attempt != MAX_UPDATE_ATTEMPTS - 1) {
+                    delay(RETRY_DELAYS[attempt])
+                }
             } catch (e: Exception) {
                 last = e
 
@@ -274,9 +310,11 @@ class ProfileWorker : BaseService() {
         private const val STATUS_CHANNEL = "profile_status_channel"
         private const val RESULT_CHANNEL = "profile_result_channel"
         private const val MAX_UPDATE_ATTEMPTS = 3
+        private val UPDATE_ATTEMPT_TIMEOUT = TimeUnit.MINUTES.toMillis(4)
         private val STALE_UPDATE_REQUEST_INTERVAL = TimeUnit.MINUTES.toMillis(1)
         @Volatile
         private var lastStaleUpdateRequest = 0L
+        private val pendingProfileUpdates = Collections.synchronizedSet(mutableSetOf<UUID>())
         private val failedUpdateProfiles = Collections.synchronizedSet(mutableSetOf<UUID>())
         private val RETRY_DELAYS = longArrayOf(
             TimeUnit.SECONDS.toMillis(10),

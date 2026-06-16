@@ -20,6 +20,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import java.util.*
 import java.util.concurrent.TimeUnit
 
@@ -50,15 +51,17 @@ object ProfileProcessor {
                 val force = snapshot.type != Profile.Type.File
                 var cb = callback
 
-                Clash.fetchAndValid(context.processingDir, snapshot.source, force) {
-                    try {
-                        cb?.updateStatus(it)
-                    } catch (e: Exception) {
-                        cb = null
+                withTimeout(FETCH_AND_VALIDATE_TIMEOUT) {
+                    Clash.fetchAndValid(context.processingDir, snapshot.source, force) {
+                        try {
+                            cb?.updateStatus(it)
+                        } catch (e: Exception) {
+                            cb = null
 
-                        Log.w("Report fetch status: $e", e)
-                    }
-                }.await()
+                            Log.w("Report fetch status: $e", e)
+                        }
+                    }.await()
+                }
 
                 profileLock.withLock {
                     if (PendingDao().queryByUUID(snapshot.uuid) == snapshot) {
@@ -80,7 +83,9 @@ object ProfileProcessor {
                         if (snapshot?.type == Profile.Type.Url) {
                             if (snapshot.source.startsWith("https://", true)) {
                                 try {
-                                    val headers = context.fetchSubscriptionHeaders(snapshot.source)
+                                    val headers = withTimeout(SUBSCRIPTION_HEADERS_TIMEOUT) {
+                                        context.fetchSubscriptionHeaders(snapshot.source)
+                                    }
                                     if (headers != null) {
                                         upload = if (headers.hasUserInfo) headers.upload else old?.upload ?: 0
                                         download = if (headers.hasUserInfo) headers.download else old?.download ?: 0
@@ -164,20 +169,24 @@ object ProfileProcessor {
 
                 var cb = callback
 
-                Clash.fetchAndValid(context.processingDir, snapshot.source, true) {
-                    try {
-                        cb?.updateStatus(it)
-                    } catch (e: Exception) {
-                        cb = null
+                withTimeout(FETCH_AND_VALIDATE_TIMEOUT) {
+                    Clash.fetchAndValid(context.processingDir, snapshot.source, true) {
+                        try {
+                            cb?.updateStatus(it)
+                        } catch (e: Exception) {
+                            cb = null
 
-                        Log.w("Report fetch status: $e", e)
-                    }
-                }.await()
+                            Log.w("Report fetch status: $e", e)
+                        }
+                    }.await()
+                }
 
                 profileLock.withLock {
                     if (ImportedDao().exists(snapshot.uuid)) {
                         val headers = try {
-                            context.fetchSubscriptionHeaders(snapshot.source)
+                            withTimeout(SUBSCRIPTION_HEADERS_TIMEOUT) {
+                                context.fetchSubscriptionHeaders(snapshot.source)
+                            }
                         } catch (e: Exception) {
                             Log.w("Report fetch subscription-userinfo status: $e", e)
                             null
@@ -266,5 +275,8 @@ object ProfileProcessor {
             interval != 0L && TimeUnit.MILLISECONDS.toMinutes(interval) < 15 -> throw IllegalArgumentException("Invalid interval")
         }
     }
+
+    private val FETCH_AND_VALIDATE_TIMEOUT = TimeUnit.MINUTES.toMillis(3)
+    private val SUBSCRIPTION_HEADERS_TIMEOUT = TimeUnit.SECONDS.toMillis(30)
 
 }

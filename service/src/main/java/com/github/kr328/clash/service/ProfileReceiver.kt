@@ -107,6 +107,8 @@ class ProfileReceiver : BroadcastReceiver() {
 
             val intent = pendingIntentOf(context, imported)
 
+            context.getSystemService<AlarmManager>()?.cancel(intent)
+
             context.getSystemService<AlarmManager>()
                 ?.scheduleCompat(System.currentTimeMillis() + RETRY_DELAY, intent)
         }
