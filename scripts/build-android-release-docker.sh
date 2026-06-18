@@ -23,6 +23,8 @@ KEYSTORE_PASSWORD="${KEYSTORE_PASSWORD:-${SIGNING_STORE_PASSWORD:-}}"
 KEY_ALIAS="${KEY_ALIAS:-${SIGNING_KEY_ALIAS:-}}"
 KEY_PASSWORD="${KEY_PASSWORD:-${SIGNING_KEY_PASSWORD:-}}"
 GENERATE_SIGNING_KEY="${GENERATE_SIGNING_KEY:-false}"
+SIGNING_CERT_DNAME="${SIGNING_CERT_DNAME:-}"
+SIGNING_KEY_VALIDITY_DAYS="${SIGNING_KEY_VALIDITY_DAYS:-10000}"
 GENERATED_SIGNING_DIR="${GENERATED_SIGNING_DIR:-$ROOT_DIR/local-signing}"
 GENERATED_KEYSTORE_FILE="${GENERATED_KEYSTORE_FILE:-$GENERATED_SIGNING_DIR/cmfa-release.keystore}"
 GENERATED_SIGNING_PROPERTIES="$GENERATED_SIGNING_DIR/signing.properties"
@@ -49,10 +51,17 @@ case "$BUILD_TYPE" in
     ;;
 esac
 
-if [[ "$BUILD_TYPE" == "Release" && ! -f "$SIGNING_PROPERTIES" && "$GENERATE_SIGNING_KEY" != "true" ]]; then
-  : "${KEYSTORE_PASSWORD:?Set KEYSTORE_PASSWORD or provide SIGNING_PROPERTIES=/path/to/signing.properties}"
-  : "${KEY_ALIAS:?Set KEY_ALIAS or provide SIGNING_PROPERTIES=/path/to/signing.properties}"
-  : "${KEY_PASSWORD:?Set KEY_PASSWORD or provide SIGNING_PROPERTIES=/path/to/signing.properties}"
+if [[ "$BUILD_TYPE" == "Release" && ! -f "$SIGNING_PROPERTIES" ]]; then
+  if [[ "$GENERATE_SIGNING_KEY" == "true" ]]; then
+    : "${KEYSTORE_PASSWORD:?Set KEYSTORE_PASSWORD before generating a release signing key}"
+    : "${KEY_ALIAS:=clash-meta-for-android-release}"
+    : "${KEY_PASSWORD:=$KEYSTORE_PASSWORD}"
+    : "${SIGNING_CERT_DNAME:?Set SIGNING_CERT_DNAME before generating a release signing key}"
+  else
+    : "${KEYSTORE_PASSWORD:?Set KEYSTORE_PASSWORD or provide SIGNING_PROPERTIES=/path/to/signing.properties}"
+    : "${KEY_ALIAS:?Set KEY_ALIAS or provide SIGNING_PROPERTIES=/path/to/signing.properties}"
+    : "${KEY_PASSWORD:?Set KEY_PASSWORD or provide SIGNING_PROPERTIES=/path/to/signing.properties}"
+  fi
 fi
 
 mkdir -p \
@@ -78,6 +87,8 @@ docker_args=(
   -e "RELEASE_TAG=$RELEASE_TAG"
   -e "REMOVE_SUFFIX=$REMOVE_SUFFIX"
   -e "GENERATE_SIGNING_KEY=$GENERATE_SIGNING_KEY"
+  -e "SIGNING_CERT_DNAME=$SIGNING_CERT_DNAME"
+  -e "SIGNING_KEY_VALIDITY_DAYS=$SIGNING_KEY_VALIDITY_DAYS"
   -e "GENERATED_KEYSTORE_FILE=/workspace/local-signing/$(basename "$GENERATED_KEYSTORE_FILE")"
   -e "GENERATED_SIGNING_PROPERTIES=/workspace/local-signing/signing.properties"
   -e "TASK=$TASK"
@@ -173,9 +184,10 @@ elif [[ "$BUILD_TYPE" == "Release" && "$GENERATE_SIGNING_KEY" == "true" ]]; then
   mkdir -p /workspace/local-signing
 
   if [[ ! -f "$GENERATED_SIGNING_PROPERTIES" ]]; then
-    : "${KEYSTORE_PASSWORD:=cmfa-local-release-pass}"
-    : "${KEY_ALIAS:=cmfa-local-release}"
+    : "${KEYSTORE_PASSWORD:?Set KEYSTORE_PASSWORD before generating a release signing key}"
+    : "${KEY_ALIAS:=clash-meta-for-android-release}"
     : "${KEY_PASSWORD:=$KEYSTORE_PASSWORD}"
+    : "${SIGNING_CERT_DNAME:?Set SIGNING_CERT_DNAME before generating a release signing key}"
 
     keytool -genkeypair \
       -v \
@@ -186,8 +198,8 @@ elif [[ "$BUILD_TYPE" == "Release" && "$GENERATE_SIGNING_KEY" == "true" ]]; then
       -keypass "$KEY_PASSWORD" \
       -keyalg RSA \
       -keysize 4096 \
-      -validity 10000 \
-      -dname "CN=ClashMetaForAndroid Local Release, OU=Local Build, O=Local, L=Local, ST=Local, C=US"
+      -validity "$SIGNING_KEY_VALIDITY_DAYS" \
+      -dname "$SIGNING_CERT_DNAME"
 
     {
       printf "keystore.file=%s\n" "${GENERATED_KEYSTORE_FILE#/workspace/}"

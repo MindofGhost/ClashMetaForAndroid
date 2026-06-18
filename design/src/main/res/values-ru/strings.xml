@@ -120,6 +120,8 @@
     <string name="allow_clash_auto_restart">Разрешить Clash автоматически перезапускаться</string>
     <string name="battery_optimization">Оптимизация батареи</string>
     <string name="battery_optimization_summary">Разрешить Clash работать в фоне без ограничений</string>
+    <string name="autostart_settings">Фоновая работа</string>
+    <string name="autostart_settings_summary">Открыть настройки автозапуска и фоновых ограничений</string>
 
     <string name="route_system_traffic">Маршрутизировать системный трафик</string>
     <string name="routing_via_vpn_service">Автоматически маршрутизировать весь системный трафик через VPN</string>

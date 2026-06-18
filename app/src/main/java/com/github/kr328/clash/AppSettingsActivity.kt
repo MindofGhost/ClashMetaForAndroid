@@ -7,6 +7,7 @@ import com.github.kr328.clash.design.model.Behavior
 import com.github.kr328.clash.design.store.UiStore.Companion.mainActivityAlias
 import com.github.kr328.clash.service.store.ServiceStore
 import com.github.kr328.clash.util.ApplicationObserver
+import com.github.kr328.clash.util.openAutostartSettings
 import com.github.kr328.clash.util.requestIgnoreBatteryOptimizations
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.selects.select
@@ -42,6 +43,9 @@ class AppSettingsActivity : BaseActivity<AppSettingsDesign>(), Behavior {
                         }
                         AppSettingsDesign.Request.RequestIgnoreBatteryOptimizations -> {
                             openBatteryOptimizationRequest()
+                        }
+                        AppSettingsDesign.Request.OpenAutostartSettings -> {
+                            openAutostartSettings()
                         }
                     }
                 }

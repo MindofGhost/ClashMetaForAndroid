@@ -24,6 +24,7 @@ class AppSettingsDesign(
     enum class Request {
         ReCreateAllActivities,
         RequestIgnoreBatteryOptimizations,
+        OpenAutostartSettings,
     }
 
     private val binding = DesignSettingsCommonBinding
@@ -56,6 +57,16 @@ class AppSettingsDesign(
             ) {
                 clicked {
                     requests.trySend(Request.RequestIgnoreBatteryOptimizations)
+                }
+            }
+
+            clickable(
+                title = R.string.autostart_settings,
+                icon = R.drawable.ic_baseline_apps,
+                summary = R.string.autostart_settings_summary,
+            ) {
+                clicked {
+                    requests.trySend(Request.OpenAutostartSettings)
                 }
             }
 

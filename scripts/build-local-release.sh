@@ -4,6 +4,7 @@ set -eu
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 
 SIGNING_PROPERTIES="${SIGNING_PROPERTIES:-$ROOT_DIR/local-signing/signing.properties}"
+GENERATE_SIGNING_KEY="${GENERATE_SIGNING_KEY:-false}"
 
 BRANCH_NAME="${BRANCH_NAME:-$(git -C "$ROOT_DIR" branch --show-current 2>/dev/null || true)}"
 if [ -z "$BRANCH_NAME" ]; then
@@ -49,14 +50,30 @@ FLAVOR="${FLAVOR:-meta}"
 BUILD_TYPE="${BUILD_TYPE:-Release}"
 
 if [ ! -f "$SIGNING_PROPERTIES" ]; then
-  echo "Signing properties not found: $SIGNING_PROPERTIES" >&2
-  echo "Create it first or pass SIGNING_PROPERTIES=/path/to/signing.properties" >&2
-  exit 1
+  if [ "$GENERATE_SIGNING_KEY" = "true" ]; then
+    : "${KEYSTORE_PASSWORD:?Set KEYSTORE_PASSWORD before generating a production release key}"
+    : "${SIGNING_CERT_DNAME:?Set SIGNING_CERT_DNAME before generating a production release key}"
+    KEY_ALIAS="${KEY_ALIAS:-clash-meta-for-android-release}"
+    KEY_PASSWORD="${KEY_PASSWORD:-$KEYSTORE_PASSWORD}"
+    export GENERATE_SIGNING_KEY
+    export KEYSTORE_PASSWORD
+    export KEY_ALIAS
+    export KEY_PASSWORD
+    export SIGNING_CERT_DNAME
+    export SIGNING_KEY_VALIDITY_DAYS="${SIGNING_KEY_VALIDITY_DAYS:-10000}"
+  else
+    echo "Signing properties not found: $SIGNING_PROPERTIES" >&2
+    echo "Create it first or pass SIGNING_PROPERTIES=/path/to/signing.properties" >&2
+    echo "To generate a production-style key once, run with:" >&2
+    echo "  GENERATE_SIGNING_KEY=true KEYSTORE_PASSWORD=... SIGNING_CERT_DNAME='CN=Clash Meta for Android, OU=Android Release, O=Your Name or Company, C=RU' $0" >&2
+    exit 1
+  fi
 fi
 
 export SIGNING_PROPERTIES
 export RELEASE_TAG
 export FLAVOR
 export BUILD_TYPE
+export GENERATE_SIGNING_KEY
 
 exec "$ROOT_DIR/scripts/build-android-release-docker.sh"
