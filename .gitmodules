@@ -5,4 +5,4 @@
 [submodule "core/src/main/golang/native/vkturn"]
 	path = core/src/main/golang/native/vkturn
 	url = https://github.com/MindofGhost/vk-turn-proxy.git
-	branch = cmfa-native
+	branch = cmfa-native-main
