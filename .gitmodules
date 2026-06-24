@@ -2,7 +2,7 @@
 	path = core/src/foss/golang/clash
 	url = https://github.com/MetaCubeX/mihomo
 	branch = Alpha
-[submodule "third_party/vk-turn-proxy-upstream"]
-	path = third_party/vk-turn-proxy-upstream
-	url = https://github.com/Moroka8/vk-turn-proxy.git
-	branch = main
+[submodule "core/src/main/golang/native/vkturn"]
+	path = core/src/main/golang/native/vkturn
+	url = https://github.com/MindofGhost/vk-turn-proxy.git
+	branch = cmfa-native
