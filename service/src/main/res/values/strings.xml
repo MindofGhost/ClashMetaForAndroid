@@ -24,6 +24,7 @@
     <string name="app_update_channel">App Updates</string>
     <string name="app_update_available">Update available</string>
     <string name="app_update_tap_to_install">Tap to download</string>
+    <string name="app_update_downloading">Downloading update</string>
     <string name="app_update_downloaded">Update downloaded</string>
     <string name="app_update_ready_to_install">Tap to install</string>
 </resources>

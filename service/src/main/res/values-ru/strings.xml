@@ -24,6 +24,7 @@
     <string name="app_update_channel">Обновления приложения</string>
     <string name="app_update_available">Доступно обновление</string>
     <string name="app_update_tap_to_install">Нажмите, чтобы скачать</string>
+    <string name="app_update_downloading">Скачивание обновления</string>
     <string name="app_update_downloaded">Обновление скачано</string>
     <string name="app_update_ready_to_install">Нажмите, чтобы установить</string>
 </resources>

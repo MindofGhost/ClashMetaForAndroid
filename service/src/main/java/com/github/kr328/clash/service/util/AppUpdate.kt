@@ -70,8 +70,6 @@ suspend fun Context.handleAppUpdateHeaders(source: String, headers: Subscription
 }
 
 suspend fun Context.downloadAndInstallAppUpdate(url: String, expectedCert: String) {
-    cancelAvailableAppUpdateNotification()
-
     if (!appUpdateDownloadLock.tryLock()) {
         Log.i("App update download skipped: already running")
         return
@@ -101,9 +99,30 @@ suspend fun Context.downloadAndInstallAppUpdate(url: String, expectedCert: Strin
                     throw IllegalStateException("Download failed: HTTP ${response.code}")
 
                 val body = response.body ?: throw IllegalStateException("Empty response body")
+                val contentLength = body.contentLength()
+                showAppUpdateDownloadProgress(0, contentLength)
                 apk.outputStream().use { output ->
                     body.byteStream().use { input ->
-                        input.copyTo(output)
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        var downloaded = 0L
+                        var lastNotified = 0L
+
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read < 0)
+                                break
+
+                            output.write(buffer, 0, read)
+                            downloaded += read
+
+                            if (contentLength > 0) {
+                                val progress = downloaded * 100 / contentLength
+                                if (progress != lastNotified) {
+                                    lastNotified = progress
+                                    showAppUpdateDownloadProgress(downloaded, contentLength)
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -114,9 +133,11 @@ suspend fun Context.downloadAndInstallAppUpdate(url: String, expectedCert: Strin
                 return
             }
 
+            cancelAvailableAppUpdateNotification()
             showAppUpdateReadyNotification()
         } catch (e: Exception) {
             apk.delete()
+            cancelAvailableAppUpdateNotification()
             throw e
         }
     } finally {
@@ -255,6 +276,33 @@ private fun Context.showAppUpdateNotification(url: String, expectedCert: String)
         .setContentIntent(pendingIntent)
         .setAutoCancel(true)
         .setOnlyAlertOnce(true)
+        .build()
+
+    notificationManager.notify(R.id.nf_app_update, notification)
+}
+
+private fun Context.showAppUpdateDownloadProgress(downloaded: Long, total: Long) {
+    val notificationManager = NotificationManagerCompat.from(this)
+    notificationManager.createNotificationChannelsCompat(
+        listOf(
+            NotificationChannelCompat.Builder(
+                APP_UPDATE_CHANNEL,
+                NotificationManagerCompat.IMPORTANCE_DEFAULT
+            ).setName(getString(R.string.app_update_channel)).build()
+        )
+    )
+
+    val indeterminate = total <= 0
+    val progress = if (indeterminate) 0 else ((downloaded * 100) / total).toInt().coerceIn(0, 100)
+
+    val notification = NotificationCompat.Builder(this, APP_UPDATE_CHANNEL)
+        .setContentTitle(getString(R.string.app_update_downloading))
+        .setContentText(if (indeterminate) getString(R.string.loading) else "$progress%")
+        .setColor(getColorCompat(R.color.color_clash))
+        .setSmallIcon(R.drawable.ic_logo_service)
+        .setOngoing(true)
+        .setOnlyAlertOnce(true)
+        .setProgress(100, progress, indeterminate)
         .build()
 
     notificationManager.notify(R.id.nf_app_update, notification)
