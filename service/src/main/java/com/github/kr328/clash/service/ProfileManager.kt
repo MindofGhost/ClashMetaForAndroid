@@ -16,7 +16,6 @@ import com.github.kr328.clash.service.util.fetchSubscriptionHeaders
 import com.github.kr328.clash.service.util.generateProfileUUID
 import com.github.kr328.clash.service.util.importedDir
 import com.github.kr328.clash.service.util.pendingDir
-import com.github.kr328.clash.service.util.sendProfileChanged
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -131,7 +130,7 @@ class ProfileManager(private val context: Context) : IProfileManager,
     }
 
     override suspend fun update(uuid: UUID) {
-        scheduleUpdate(uuid, true)
+        scheduleUpdate(uuid, true, forceReload = true)
         ImportedDao().queryByUUID(uuid)?.let {
             if (it.type == Profile.Type.Url && it.source.startsWith("https://",true)) {
                 updateFlow(it)
@@ -166,7 +165,6 @@ class ProfileManager(private val context: Context) : IProfileManager,
             ImportedDao().update(new)
 
             PendingDao().remove(new.uuid)
-            context.sendProfileChanged(new.uuid)
 
         } catch (e: Exception) {
             Log.w("Report fetch subscription-userinfo status: $e", e)
@@ -273,11 +271,15 @@ class ProfileManager(private val context: Context) : IProfileManager,
         s.copyRecursively(t)
     }
 
-    private suspend fun scheduleUpdate(uuid: UUID, startImmediately: Boolean) {
+    private suspend fun scheduleUpdate(
+        uuid: UUID,
+        startImmediately: Boolean,
+        forceReload: Boolean = false
+    ) {
         val imported = ImportedDao().queryByUUID(uuid) ?: return
 
         if (startImmediately) {
-            ProfileReceiver.schedule(context, imported)
+            ProfileReceiver.schedule(context, imported, forceReload)
         } else {
             ProfileReceiver.scheduleNext(context, imported)
         }

@@ -69,8 +69,8 @@ class ProfileReceiver : BroadcastReceiver() {
             context.getSystemService<AlarmManager>()?.cancel(intent)
         }
 
-        fun schedule(context: Context, imported: Imported) {
-            val intent = pendingIntentOf(context, imported)
+        fun schedule(context: Context, imported: Imported, forceReload: Boolean = false) {
+            val intent = pendingIntentOf(context, imported, forceReload)
 
             context.getSystemService<AlarmManager>()?.cancel(intent)
 
@@ -117,10 +117,15 @@ class ProfileReceiver : BroadcastReceiver() {
             initialized = false
         }
 
-        private fun pendingIntentOf(context: Context, imported: Imported): PendingIntent {
+        private fun pendingIntentOf(
+            context: Context,
+            imported: Imported,
+            forceReload: Boolean = false
+        ): PendingIntent {
             val intent = Intent(Intents.ACTION_PROFILE_REQUEST_UPDATE)
                 .setComponent(ProfileReceiver::class.componentName)
                 .setUUID(imported.uuid)
+                .putExtra(Intents.EXTRA_FORCE_RELOAD, forceReload)
 
             return PendingIntent.getBroadcast(
                 context,

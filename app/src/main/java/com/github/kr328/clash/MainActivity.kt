@@ -54,7 +54,9 @@ class MainActivity : BaseActivity<MainDesign>() {
                         Event.ActivityStart,
                         Event.ServiceRecreated,
                         Event.ClashStop, Event.ClashStart,
-                        Event.ProfileLoaded, Event.ProfileChanged -> design.fetch()
+                        Event.ProfileLoaded,
+                        Event.ProfileChanged,
+                        Event.ProfileUpdateCompleted -> design.fetch()
                         else -> Unit
                     }
                 }

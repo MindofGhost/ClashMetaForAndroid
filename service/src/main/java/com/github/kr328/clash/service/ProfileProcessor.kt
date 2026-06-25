@@ -21,6 +21,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import java.io.File
+import java.security.MessageDigest
 import java.util.*
 import java.util.concurrent.TimeUnit
 
@@ -149,7 +151,12 @@ object ProfileProcessor {
         }
     }
 
-    suspend fun update(context: Context, uuid: UUID, callback: IFetchObserver?) {
+    suspend fun update(
+        context: Context,
+        uuid: UUID,
+        callback: IFetchObserver?,
+        forceReload: Boolean = false
+    ) {
         withContext(NonCancellable) {
             processLock.withLock {
                 val snapshot = profileLock.withLock {
@@ -208,11 +215,17 @@ object ProfileProcessor {
                             snapshot
                         }
 
-                        context.importedDir.resolve(snapshot.uuid.toString()).deleteRecursively()
-                        context.processingDir.copyRecursively(context.importedDir.resolve(snapshot.uuid.toString()))
-
-                        ImportedDao().update(updated)
-                        context.sendProfileChanged(snapshot.uuid)
+                        val importedDir = context.importedDir.resolve(snapshot.uuid.toString())
+                        if (!forceReload && hasSameProfileContent(importedDir, context.processingDir)) {
+                            ImportedDao().update(updated)
+                            markProfileChecked(importedDir)
+                            Log.i("Profile ${snapshot.name} content unchanged, skip reload")
+                        } else {
+                            importedDir.deleteRecursively()
+                            context.processingDir.copyRecursively(importedDir)
+                            ImportedDao().update(updated)
+                            context.sendProfileChanged(snapshot.uuid)
+                        }
                     }
                 }
             }
@@ -274,6 +287,56 @@ object ProfileProcessor {
 
             interval != 0L && TimeUnit.MILLISECONDS.toMinutes(interval) < 15 -> throw IllegalArgumentException("Invalid interval")
         }
+    }
+
+    private fun hasSameProfileContent(current: File, updated: File): Boolean {
+        val currentDigest = current.contentDigest() ?: return false
+        val updatedDigest = updated.contentDigest() ?: return false
+
+        return currentDigest.contentEquals(updatedDigest)
+    }
+
+    private fun markProfileChecked(profileDir: File) {
+        val config = profileDir.resolve("config.yaml")
+
+        if (config.exists()) {
+            config.setLastModified(System.currentTimeMillis())
+        }
+    }
+
+    private fun File.contentDigest(): ByteArray? {
+        if (!exists())
+            return null
+
+        val digest = MessageDigest.getInstance("SHA-256")
+        val root = if (isDirectory) this else parentFile ?: return null
+        val files = if (isDirectory) {
+            walkTopDown()
+                .filter { it.isFile }
+                .sortedBy { it.relativeTo(root).invariantSeparatorsPath }
+                .toList()
+        } else {
+            listOf(this)
+        }
+        val buffer = ByteArray(8192)
+
+        files.forEach { file ->
+            digest.update(file.relativeTo(root).invariantSeparatorsPath.toByteArray(Charsets.UTF_8))
+            digest.update(0.toByte())
+
+            file.inputStream().use { input ->
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0)
+                        break
+
+                    digest.update(buffer, 0, read)
+                }
+            }
+            digest.update(0.toByte())
+        }
+
+        return digest.digest()
     }
 
     private val FETCH_AND_VALIDATE_TIMEOUT = TimeUnit.MINUTES.toMillis(3)

@@ -63,8 +63,9 @@ class ProfileWorker : BaseService() {
         when (intent?.action) {
             Intents.ACTION_PROFILE_REQUEST_UPDATE -> {
                 intent.uuid?.also {
+                    val forceReload = intent.getBooleanExtra(Intents.EXTRA_FORCE_RELOAD, false)
                     val job = launch {
-                        runDeduplicated(it, "request")
+                        runDeduplicated(it, "request", forceReload)
                     }
 
                     enqueueJob(job)
@@ -142,25 +143,25 @@ class ProfileWorker : BaseService() {
             }
     }
 
-    private suspend fun runDeduplicated(uuid: UUID, reason: String) {
+    private suspend fun runDeduplicated(uuid: UUID, reason: String, forceReload: Boolean = false) {
         if (!pendingProfileUpdates.add(uuid)) {
             Log.i("Skip duplicate profile update: $uuid reason=$reason")
             return
         }
 
         try {
-            run(uuid)
+            run(uuid, forceReload)
         } finally {
             pendingProfileUpdates.remove(uuid)
         }
     }
 
-    private suspend fun run(uuid: UUID) {
+    private suspend fun run(uuid: UUID, forceReload: Boolean) {
         val imported = ImportedDao().queryByUUID(uuid) ?: return
 
         try {
             processing(imported.name) {
-                updateWithRetry(imported.uuid)
+                updateWithRetry(imported.uuid, forceReload)
             }
 
             completed(imported.uuid)
@@ -180,13 +181,13 @@ class ProfileWorker : BaseService() {
         }
     }
 
-    private suspend fun updateWithRetry(uuid: UUID) {
+    private suspend fun updateWithRetry(uuid: UUID, forceReload: Boolean) {
         var last: Exception? = null
 
         repeat(MAX_UPDATE_ATTEMPTS) { attempt ->
             try {
                 withTimeout(UPDATE_ATTEMPT_TIMEOUT) {
-                    ProfileProcessor.update(this@ProfileWorker, uuid, null)
+                    ProfileProcessor.update(this@ProfileWorker, uuid, null, forceReload)
                 }
                 return
             } catch (e: TimeoutCancellationException) {
