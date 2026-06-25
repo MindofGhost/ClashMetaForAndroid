@@ -8,6 +8,7 @@ import com.github.kr328.clash.common.Global
 import com.github.kr328.clash.common.log.Log
 import com.github.kr328.clash.common.util.intent
 import com.github.kr328.clash.service.ProfileWorker
+import com.github.kr328.clash.service.util.clearAppUpdateCache
 import com.github.kr328.clash.store.AppStore
 import com.github.kr328.clash.util.ApplicationObserver
 import com.github.kr328.clash.util.verifyApk
@@ -68,6 +69,7 @@ object Remote {
 
                 return context.startActivity(intent)
             } else {
+                context.clearAppUpdateCache()
                 store.updatedAt = updatedAt
             }
         }

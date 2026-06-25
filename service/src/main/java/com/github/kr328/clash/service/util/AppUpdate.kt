@@ -20,6 +20,7 @@ import com.github.kr328.clash.common.util.componentName
 import com.github.kr328.clash.service.ProfileWorker
 import com.github.kr328.clash.service.R
 import com.github.kr328.clash.service.store.ServiceStore
+import kotlinx.coroutines.sync.Mutex
 import okhttp3.Credentials
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -31,6 +32,7 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 private const val APP_UPDATE_CHANNEL = "app_update_channel"
+private val appUpdateDownloadLock = Mutex()
 
 suspend fun Context.handleAppUpdateHeaders(source: String, headers: SubscriptionHeaders?) {
     if (!ServiceStore(this).appUpdateNotifications) {
@@ -63,38 +65,92 @@ suspend fun Context.handleAppUpdateHeaders(source: String, headers: Subscription
 }
 
 suspend fun Context.downloadAndInstallAppUpdate(url: String, expectedCert: String) {
-    if (!currentSigningCertificateSha256().contains(expectedCert)) {
-        Log.w("App update download skipped: signing certificate mismatch")
+    cancelAppUpdateNotification()
+
+    if (!appUpdateDownloadLock.tryLock()) {
+        Log.i("App update download skipped: already running")
         return
     }
 
-    val apk = cacheDir.resolve("updates").apply { mkdirs() }.resolve("update.apk")
-    val client = appUpdateClient()
-    val request = Request.Builder()
-        .url(url)
-        .get()
-        .withUrlBasicAuth()
-        .build()
-
-    client.newCall(request).execute().use { response ->
-        if (!response.isSuccessful)
-            throw IllegalStateException("Download failed: HTTP ${response.code}")
-
-        val body = response.body ?: throw IllegalStateException("Empty response body")
-        apk.outputStream().use { output ->
-            body.byteStream().use { input ->
-                input.copyTo(output)
-            }
+    try {
+        if (!currentSigningCertificateSha256().contains(expectedCert)) {
+            Log.w("App update download skipped: signing certificate mismatch")
+            return
         }
+
+        val updateDir = appUpdateCacheDir.apply {
+            deleteRecursively()
+            mkdirs()
+        }
+        val apk = appUpdateApk
+        val client = appUpdateClient()
+        val request = Request.Builder()
+            .url(url)
+            .get()
+            .withUrlBasicAuth()
+            .build()
+
+        try {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful)
+                    throw IllegalStateException("Download failed: HTTP ${response.code}")
+
+                val body = response.body ?: throw IllegalStateException("Empty response body")
+                apk.outputStream().use { output ->
+                    body.byteStream().use { input ->
+                        input.copyTo(output)
+                    }
+                }
+            }
+
+            if (!downloadedApkMatchesCurrentApp(apk)) {
+                apk.delete()
+                Log.w("App update download rejected: APK signature or package name mismatch")
+                return
+            }
+
+            showAppUpdateReadyNotification()
+        } catch (e: Exception) {
+            apk.delete()
+            throw e
+        }
+    } finally {
+        appUpdateDownloadLock.unlock()
+    }
+}
+
+fun Context.restoreDownloadedAppUpdateNotification() {
+    val apk = appUpdateApk
+    if (!apk.exists())
+        return
+
+    if (downloadedApkMatchesCurrentApp(apk)) {
+        showAppUpdateReadyNotification()
+    } else {
+        clearAppUpdateCache()
+    }
+}
+
+fun Context.installDownloadedAppUpdate() {
+    val apk = appUpdateApk
+    if (!apk.exists()) {
+        cancelAppUpdateNotification()
+        Log.w("App update install skipped: downloaded APK is missing")
+        return
     }
 
     if (!downloadedApkMatchesCurrentApp(apk)) {
-        apk.delete()
-        Log.w("App update download rejected: APK signature or package name mismatch")
+        clearAppUpdateCache()
+        Log.w("App update install skipped: APK signature or package name mismatch")
         return
     }
 
     installAppUpdate(apk)
+}
+
+fun Context.clearAppUpdateCache() {
+    cancelAppUpdateNotification()
+    appUpdateCacheDir.deleteRecursively()
 }
 
 private fun Context.resolveAvailableAppUpdateUrl(source: String, template: String): String? {
@@ -189,8 +245,51 @@ private fun Context.showAppUpdateNotification(url: String, expectedCert: String)
         .setColor(getColorCompat(R.color.color_clash))
         .setSmallIcon(R.drawable.ic_logo_service)
         .setContentIntent(pendingIntent)
-        .setAutoCancel(false)
+        .setAutoCancel(true)
         .setOnlyAlertOnce(true)
+        .build()
+
+    notificationManager.notify(R.id.nf_app_update, notification)
+}
+
+private fun Context.showAppUpdateReadyNotification() {
+    val notificationManager = NotificationManagerCompat.from(this)
+    notificationManager.createNotificationChannelsCompat(
+        listOf(
+            NotificationChannelCompat.Builder(
+                APP_UPDATE_CHANNEL,
+                NotificationManagerCompat.IMPORTANCE_DEFAULT
+            ).setName(getString(R.string.app_update_channel)).build()
+        )
+    )
+
+    val intent = Intent(Intents.ACTION_APP_UPDATE_OPEN_DOWNLOADED)
+        .setComponent(ProfileWorker::class.componentName)
+
+    val pendingIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        PendingIntent.getForegroundService(
+            this,
+            R.id.nf_app_update,
+            intent,
+            pendingIntentFlags(PendingIntent.FLAG_UPDATE_CURRENT)
+        )
+    } else {
+        PendingIntent.getService(
+            this,
+            R.id.nf_app_update,
+            intent,
+            pendingIntentFlags(PendingIntent.FLAG_UPDATE_CURRENT)
+        )
+    }
+
+    val notification = NotificationCompat.Builder(this, APP_UPDATE_CHANNEL)
+        .setContentTitle(getString(R.string.app_update_downloaded))
+        .setContentText(getString(R.string.app_update_ready_to_install))
+        .setColor(getColorCompat(R.color.color_clash))
+        .setSmallIcon(R.drawable.ic_logo_service)
+        .setContentIntent(pendingIntent)
+        .setAutoCancel(true)
+        .setOnlyAlertOnce(false)
         .build()
 
     notificationManager.notify(R.id.nf_app_update, notification)
@@ -258,6 +357,12 @@ private fun appUpdateClient(): OkHttpClient {
         .followSslRedirects(true)
         .build()
 }
+
+private val Context.appUpdateCacheDir: File
+    get() = cacheDir.resolve("updates")
+
+private val Context.appUpdateApk: File
+    get() = appUpdateCacheDir.resolve("update.apk")
 
 private fun Request.Builder.withUrlBasicAuth(): Request.Builder {
     val url = build().url

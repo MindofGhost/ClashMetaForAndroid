@@ -24,6 +24,7 @@ object Intents {
     val ACTION_PROFILE_UPDATE_ON_START = "$packageName.intent.action.UPDATE_ON_START"
     val ACTION_PROFILE_UPDATE_STALE = "$packageName.intent.action.UPDATE_STALE"
     val ACTION_APP_UPDATE_INSTALL = "$packageName.intent.action.APP_UPDATE_INSTALL"
+    val ACTION_APP_UPDATE_OPEN_DOWNLOADED = "$packageName.intent.action.APP_UPDATE_OPEN_DOWNLOADED"
     val ACTION_PROFILE_LOADED = "$packageName.intent.action.PROFILE_LOADED"
     val ACTION_OVERRIDE_CHANGED = "$packageName.intent.action.OVERRIDE_CHANGED"
 

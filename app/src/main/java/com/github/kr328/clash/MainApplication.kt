@@ -14,6 +14,7 @@ import com.github.kr328.clash.common.util.componentName
 import com.github.kr328.clash.remote.Remote
 import com.github.kr328.clash.service.ProfileWorker
 import com.github.kr328.clash.service.StatusProvider
+import com.github.kr328.clash.service.util.restoreDownloadedAppUpdateNotification
 import com.github.kr328.clash.service.util.sendServiceRecreated
 import com.github.kr328.clash.util.clashDir
 import com.github.kr328.clash.util.startClashService
@@ -39,6 +40,7 @@ class MainApplication : Application() {
 
         if (processName == packageName) {
             Remote.launch()
+            restoreDownloadedAppUpdateNotification()
             registerScreenRestartReceiver()
             updateProfilesOnStart()
         } else {

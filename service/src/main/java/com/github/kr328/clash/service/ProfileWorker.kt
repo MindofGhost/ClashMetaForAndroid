@@ -22,6 +22,8 @@ import com.github.kr328.clash.service.data.ImportedDao
 import com.github.kr328.clash.service.model.Profile
 import com.github.kr328.clash.service.util.importedDir
 import com.github.kr328.clash.service.util.downloadAndInstallAppUpdate
+import com.github.kr328.clash.service.util.installDownloadedAppUpdate
+import com.github.kr328.clash.service.util.restoreDownloadedAppUpdateNotification
 import com.github.kr328.clash.service.util.sendProfileUpdateCompleted
 import com.github.kr328.clash.service.util.sendProfileUpdateFailed
 import kotlinx.coroutines.*
@@ -40,6 +42,7 @@ class ProfileWorker : BaseService() {
         createChannels()
 
         foreground()
+        restoreDownloadedAppUpdateNotification()
 
         launch {
             delay(TimeUnit.SECONDS.toMillis(10))
@@ -109,6 +112,17 @@ class ProfileWorker : BaseService() {
 
                     enqueueJob(job)
                 }
+            }
+            Intents.ACTION_APP_UPDATE_OPEN_DOWNLOADED -> {
+                val job = launch {
+                    try {
+                        installDownloadedAppUpdate()
+                    } catch (e: Exception) {
+                        Log.w("Open downloaded app update failed: ${e.message}", e)
+                    }
+                }
+
+                enqueueJob(job)
             }
         }
 
