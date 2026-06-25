@@ -21,6 +21,7 @@ import com.github.kr328.clash.common.util.uuid
 import com.github.kr328.clash.service.data.ImportedDao
 import com.github.kr328.clash.service.model.Profile
 import com.github.kr328.clash.service.util.importedDir
+import com.github.kr328.clash.service.util.clearAppUpdateCacheIfPackageChanged
 import com.github.kr328.clash.service.util.downloadAndInstallAppUpdate
 import com.github.kr328.clash.service.util.installDownloadedAppUpdate
 import com.github.kr328.clash.service.util.restoreDownloadedAppUpdateNotification
@@ -42,6 +43,7 @@ class ProfileWorker : BaseService() {
         createChannels()
 
         foreground()
+        clearAppUpdateCacheIfPackageChanged()
         restoreDownloadedAppUpdateNotification()
 
         launch {

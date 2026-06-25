@@ -182,6 +182,17 @@ fun Context.clearAppUpdateCache() {
     appUpdateCacheDir.deleteRecursively()
 }
 
+fun Context.clearAppUpdateCacheIfPackageChanged() {
+    val store = ServiceStore(this)
+    val lastPackageUpdate = packageManager.getPackageInfo(packageName, 0).lastUpdateTime
+
+    if (store.appUpdateLastPackageUpdate == lastPackageUpdate)
+        return
+
+    clearAppUpdateCache()
+    store.appUpdateLastPackageUpdate = lastPackageUpdate
+}
+
 private fun Context.resolveAvailableAppUpdateUrl(source: String, template: String): String? {
     val abis = Build.SUPPORTED_ABIS.takeIf { it.isNotEmpty() } ?: return null
 

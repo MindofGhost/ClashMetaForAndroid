@@ -75,4 +75,9 @@ class ServiceStore(context: Context) {
         key = "app_update_notifications",
         defaultValue = true
     )
+
+    var appUpdateLastPackageUpdate by store.long(
+        key = "app_update_last_package_update",
+        defaultValue = -1
+    )
 }
