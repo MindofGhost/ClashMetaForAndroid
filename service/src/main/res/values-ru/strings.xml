@@ -21,4 +21,7 @@
     <string name="provider_files">Файлы провайдера</string>
     <string name="profile_updater">Обновление профиля</string>
     <string name="profile_updating">Профиль обновляется</string>
+    <string name="app_update_channel">Обновления приложения</string>
+    <string name="app_update_available">Доступно обновление</string>
+    <string name="app_update_tap_to_install">Нажмите, чтобы скачать и установить</string>
 </resources>

@@ -70,4 +70,9 @@ class ServiceStore(context: Context) {
         key = "dynamic_notification",
         defaultValue = true
     )
+
+    var appUpdateNotifications by store.boolean(
+        key = "app_update_notifications",
+        defaultValue = true
+    )
 }

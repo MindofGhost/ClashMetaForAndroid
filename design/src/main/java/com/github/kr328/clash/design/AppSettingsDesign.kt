@@ -120,6 +120,13 @@ class AppSettingsDesign(
             ) {
                 enabled = !running
             }
+
+            switch(
+                value = srvStore::appUpdateNotifications,
+                icon = R.drawable.ic_baseline_update,
+                title = R.string.app_update_notifications,
+                summary = R.string.app_update_notifications_summary
+            )
         }
 
         binding.content.addView(screen.root)

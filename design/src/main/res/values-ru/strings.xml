@@ -238,6 +238,8 @@
 
     <string name="show_traffic">Показывать трафик</string>
     <string name="show_traffic_summary">Автоматически обновлять счётчик трафика в уведомлении</string>
+    <string name="app_update_notifications">Обновления приложения</string>
+    <string name="app_update_notifications_summary">Показывать уведомление, если подписка передала совместимый APK</string>
 
     <string name="follow_system_android_10">Как в системе (Android 10+)</string>
     <string name="always_dark">Всегда тёмная</string>

@@ -14,6 +14,7 @@ import com.github.kr328.clash.service.store.ServiceStore
 import com.github.kr328.clash.service.util.directoryLastModified
 import com.github.kr328.clash.service.util.fetchSubscriptionHeaders
 import com.github.kr328.clash.service.util.generateProfileUUID
+import com.github.kr328.clash.service.util.handleAppUpdateHeaders
 import com.github.kr328.clash.service.util.importedDir
 import com.github.kr328.clash.service.util.pendingDir
 import kotlinx.coroutines.CoroutineScope
@@ -141,6 +142,7 @@ class ProfileManager(private val context: Context) : IProfileManager,
     suspend fun updateFlow(old: Imported) {
         try {
             val headers = context.fetchSubscriptionHeaders(old.source) ?: return
+            context.handleAppUpdateHeaders(old.source, headers)
 
             val new = Imported(
                 old.uuid,

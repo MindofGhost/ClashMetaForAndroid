@@ -24,6 +24,8 @@ data class SubscriptionHeaders(
     val subExpire: Boolean = false,
     val subExpireButtonLink: String? = null,
     val profileUpdateIntervalHours: Long? = null,
+    val appUpdateUrl: String? = null,
+    val appUpdateCertSha256: String? = null,
 )
 
 suspend fun Context.fetchSubscriptionHeaders(source: String): SubscriptionHeaders? {
@@ -99,6 +101,12 @@ private fun parseSubscriptionHeaders(headers: Headers): SubscriptionHeaders {
         subExpire = headers["sub-expire"]?.trim()?.let { it == "1" || it.equals("true", true) } == true,
         subExpireButtonLink = headers["sub-expire-button-link"]?.trim()?.takeIf { it.isNotEmpty() },
         profileUpdateIntervalHours = headers["profile-update-interval"]?.trim()?.toLongOrNull(),
+        appUpdateUrl = headers["app-update-url"]?.trim()?.takeIf { it.isNotEmpty() },
+        appUpdateCertSha256 = headers["app-update-cert-sha256"]
+            ?.trim()
+            ?.lowercase(Locale.ROOT)
+            ?.replace(":", "")
+            ?.takeIf { it.matches(Regex("[0-9a-f]{64}")) },
     )
 }
 

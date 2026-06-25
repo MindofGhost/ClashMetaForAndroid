@@ -256,6 +256,8 @@
 
     <string name="show_traffic">Show Traffic</string>
     <string name="show_traffic_summary">Auto refresh traffic in notification</string>
+    <string name="app_update_notifications">App Updates</string>
+    <string name="app_update_notifications_summary">Show update notification when subscription headers provide a compatible APK</string>
 
     <string name="follow_system_android_10">Follow System (Android 10+)</string>
     <string name="always_dark">Always Dark</string>

@@ -23,6 +23,7 @@ object Intents {
     val ACTION_PROFILE_SCHEDULE_UPDATES = "$packageName.intent.action.SCHEDULE_UPDATES"
     val ACTION_PROFILE_UPDATE_ON_START = "$packageName.intent.action.UPDATE_ON_START"
     val ACTION_PROFILE_UPDATE_STALE = "$packageName.intent.action.UPDATE_STALE"
+    val ACTION_APP_UPDATE_INSTALL = "$packageName.intent.action.APP_UPDATE_INSTALL"
     val ACTION_PROFILE_LOADED = "$packageName.intent.action.PROFILE_LOADED"
     val ACTION_OVERRIDE_CHANGED = "$packageName.intent.action.OVERRIDE_CHANGED"
 
@@ -30,4 +31,6 @@ object Intents {
     const val EXTRA_UUID = "uuid"
     const val EXTRA_FAIL_REASON = "fail_reason"
     const val EXTRA_FORCE_RELOAD = "force_reload"
+    const val EXTRA_URL = "url"
+    const val EXTRA_CERT_SHA256 = "cert_sha256"
 }

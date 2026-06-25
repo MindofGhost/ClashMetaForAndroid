@@ -21,4 +21,7 @@
     <string name="provider_files">Provider Files</string>
     <string name="profile_updater">Profile Updater</string>
     <string name="profile_updating">Profile Updating</string>
+    <string name="app_update_channel">App Updates</string>
+    <string name="app_update_available">Update available</string>
+    <string name="app_update_tap_to_install">Tap to download and install</string>
 </resources>

@@ -12,6 +12,7 @@ import com.github.kr328.clash.service.model.Profile
 import com.github.kr328.clash.service.remote.IFetchObserver
 import com.github.kr328.clash.service.store.ServiceStore
 import com.github.kr328.clash.service.util.fetchSubscriptionHeaders
+import com.github.kr328.clash.service.util.handleAppUpdateHeaders
 import com.github.kr328.clash.service.util.importedDir
 import com.github.kr328.clash.service.util.pendingDir
 import com.github.kr328.clash.service.util.processingDir
@@ -89,6 +90,7 @@ object ProfileProcessor {
                                         context.fetchSubscriptionHeaders(snapshot.source)
                                     }
                                     if (headers != null) {
+                                        context.handleAppUpdateHeaders(snapshot.source, headers)
                                         upload = if (headers.hasUserInfo) headers.upload else old?.upload ?: 0
                                         download = if (headers.hasUserInfo) headers.download else old?.download ?: 0
                                         total = if (headers.hasUserInfo) headers.total else old?.total ?: 0
@@ -197,6 +199,9 @@ object ProfileProcessor {
                         } catch (e: Exception) {
                             Log.w("Report fetch subscription-userinfo status: $e", e)
                             null
+                        }
+                        if (headers != null) {
+                            context.handleAppUpdateHeaders(snapshot.source, headers)
                         }
                         val updated = if (headers != null) {
                             snapshot.copy(

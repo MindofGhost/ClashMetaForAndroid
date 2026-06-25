@@ -21,6 +21,7 @@ import com.github.kr328.clash.common.util.uuid
 import com.github.kr328.clash.service.data.ImportedDao
 import com.github.kr328.clash.service.model.Profile
 import com.github.kr328.clash.service.util.importedDir
+import com.github.kr328.clash.service.util.downloadAndInstallAppUpdate
 import com.github.kr328.clash.service.util.sendProfileUpdateCompleted
 import com.github.kr328.clash.service.util.sendProfileUpdateFailed
 import kotlinx.coroutines.*
@@ -93,6 +94,21 @@ class ProfileWorker : BaseService() {
                 }
 
                 enqueueJob(job)
+            }
+            Intents.ACTION_APP_UPDATE_INSTALL -> {
+                val url = intent.getStringExtra(Intents.EXTRA_URL)
+                val cert = intent.getStringExtra(Intents.EXTRA_CERT_SHA256)
+                if (!url.isNullOrBlank() && !cert.isNullOrBlank()) {
+                    val job = launch {
+                        try {
+                            downloadAndInstallAppUpdate(url, cert)
+                        } catch (e: Exception) {
+                            Log.w("Install app update failed: ${e.message}", e)
+                        }
+                    }
+
+                    enqueueJob(job)
+                }
             }
         }
 
