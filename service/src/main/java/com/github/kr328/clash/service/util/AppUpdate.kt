@@ -36,7 +36,7 @@ private val appUpdateDownloadLock = Mutex()
 
 suspend fun Context.handleAppUpdateHeaders(source: String, headers: SubscriptionHeaders?) {
     if (!ServiceStore(this).appUpdateNotifications) {
-        cancelAppUpdateNotification()
+        cancelAppUpdateNotifications()
         return
     }
 
@@ -44,19 +44,24 @@ suspend fun Context.handleAppUpdateHeaders(source: String, headers: Subscription
     val expectedCert = headers?.appUpdateCertSha256
 
     if (template.isNullOrBlank() || expectedCert.isNullOrBlank()) {
-        cancelAppUpdateNotification()
+        cancelAvailableAppUpdateNotification()
         return
     }
 
     if (!currentSigningCertificateSha256().contains(expectedCert)) {
-        cancelAppUpdateNotification()
+        cancelAppUpdateNotifications()
         Log.w("App update ignored: signing certificate mismatch")
+        return
+    }
+
+    if (restoreDownloadedAppUpdateNotification()) {
+        cancelAvailableAppUpdateNotification()
         return
     }
 
     val url = resolveAvailableAppUpdateUrl(source, template)
     if (url == null) {
-        cancelAppUpdateNotification()
+        cancelAvailableAppUpdateNotification()
         Log.w("App update ignored: no APK URL is available")
         return
     }
@@ -65,7 +70,7 @@ suspend fun Context.handleAppUpdateHeaders(source: String, headers: Subscription
 }
 
 suspend fun Context.downloadAndInstallAppUpdate(url: String, expectedCert: String) {
-    cancelAppUpdateNotification()
+    cancelAvailableAppUpdateNotification()
 
     if (!appUpdateDownloadLock.tryLock()) {
         Log.i("App update download skipped: already running")
@@ -119,22 +124,25 @@ suspend fun Context.downloadAndInstallAppUpdate(url: String, expectedCert: Strin
     }
 }
 
-fun Context.restoreDownloadedAppUpdateNotification() {
+fun Context.restoreDownloadedAppUpdateNotification(): Boolean {
     val apk = appUpdateApk
     if (!apk.exists())
-        return
+        return false
 
     if (downloadedApkMatchesCurrentApp(apk)) {
         showAppUpdateReadyNotification()
+        return true
     } else {
         clearAppUpdateCache()
     }
+
+    return false
 }
 
 fun Context.installDownloadedAppUpdate() {
     val apk = appUpdateApk
     if (!apk.exists()) {
-        cancelAppUpdateNotification()
+        cancelReadyAppUpdateNotification()
         Log.w("App update install skipped: downloaded APK is missing")
         return
     }
@@ -149,7 +157,7 @@ fun Context.installDownloadedAppUpdate() {
 }
 
 fun Context.clearAppUpdateCache() {
-    cancelAppUpdateNotification()
+    cancelAppUpdateNotifications()
     appUpdateCacheDir.deleteRecursively()
 }
 
@@ -269,14 +277,14 @@ private fun Context.showAppUpdateReadyNotification() {
     val pendingIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         PendingIntent.getForegroundService(
             this,
-            R.id.nf_app_update,
+            R.id.nf_app_update_ready,
             intent,
             pendingIntentFlags(PendingIntent.FLAG_UPDATE_CURRENT)
         )
     } else {
         PendingIntent.getService(
             this,
-            R.id.nf_app_update,
+            R.id.nf_app_update_ready,
             intent,
             pendingIntentFlags(PendingIntent.FLAG_UPDATE_CURRENT)
         )
@@ -292,11 +300,20 @@ private fun Context.showAppUpdateReadyNotification() {
         .setOnlyAlertOnce(false)
         .build()
 
-    notificationManager.notify(R.id.nf_app_update, notification)
+    notificationManager.notify(R.id.nf_app_update_ready, notification)
 }
 
-private fun Context.cancelAppUpdateNotification() {
+private fun Context.cancelAppUpdateNotifications() {
+    cancelAvailableAppUpdateNotification()
+    cancelReadyAppUpdateNotification()
+}
+
+private fun Context.cancelAvailableAppUpdateNotification() {
     NotificationManagerCompat.from(this).cancel(R.id.nf_app_update)
+}
+
+private fun Context.cancelReadyAppUpdateNotification() {
+    NotificationManagerCompat.from(this).cancel(R.id.nf_app_update_ready)
 }
 
 private fun Context.installAppUpdate(apk: File) {

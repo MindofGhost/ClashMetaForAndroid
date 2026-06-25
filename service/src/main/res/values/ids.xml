@@ -5,4 +5,5 @@
     <item name="nf_profile_worker" type="id" />
     <item name="nf_vk_turn_captcha" type="id" />
     <item name="nf_app_update" type="id" />
+    <item name="nf_app_update_ready" type="id" />
 </resources>
