@@ -1,8 +1,8 @@
 [submodule "clash-foss"]
 	path = core/src/foss/golang/clash
 	url = https://github.com/MetaCubeX/mihomo
-	branch = Alpha
+	branch = Meta
 [submodule "core/src/main/golang/native/vkturn"]
 	path = core/src/main/golang/native/vkturn
 	url = https://github.com/MindofGhost/vk-turn-proxy.git
-	branch = cmfa-native-main
+	branch = cmfa-native-port
