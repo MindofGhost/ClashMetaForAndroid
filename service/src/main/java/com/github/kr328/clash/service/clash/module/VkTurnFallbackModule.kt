@@ -209,9 +209,13 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
             return
         }
 
-        resumeWatchdog?.cancel()
+        if (resumeWatchdog?.isActive == true)
+            return
+
         resumeWatchdog = scope.launch {
             delay(HEALTH_WATCHDOG_DELAY)
+
+            resumeWatchdog = null
 
             if (runningArgs != args || waitingForCaptcha)
                 return@launch
