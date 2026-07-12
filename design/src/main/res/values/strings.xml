@@ -128,6 +128,8 @@
     <string name="allow_clash_auto_restart">Allow clash auto restart</string>
     <string name="battery_optimization">Battery Optimization</string>
     <string name="battery_optimization_summary">Allow Clash to keep running in the background</string>
+    <string name="keep_vpn_awake">Keep VPN awake</string>
+    <string name="keep_vpn_awake_summary">Prevent CPU sleep while VPN is running. Increases battery usage</string>
     <string name="autostart_settings">Background Activity</string>
     <string name="autostart_settings_summary">Open device settings for autostart and background restrictions</string>
 
@@ -152,6 +154,9 @@
     <string name="access_control_mode">Access Control Mode</string>
     <string name="access_control_packages">Access Control Packages</string>
     <string name="access_control_packages_summary">Configure access permission for apps</string>
+    <string name="tun_pause_packages">Hide VPN for apps</string>
+    <string name="tun_pause_packages_summary">Close TUN and send all device traffic directly while selected apps are visible</string>
+    <string name="usage_access_required">Usage access is required to detect the visible app</string>
 
     <string name="options_unavailable">Options Unavailable until Clash Stopped</string>
 

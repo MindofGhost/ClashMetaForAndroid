@@ -36,6 +36,11 @@ class ServiceStore(context: Context) {
         defaultValue = emptySet()
     )
 
+    var tunPausePackages by store.stringSet(
+        key = "tun_pause_packages",
+        defaultValue = emptySet()
+    )
+
     var dnsHijacking by store.boolean(
         key = "dns_hijacking",
         defaultValue = true
@@ -69,6 +74,11 @@ class ServiceStore(context: Context) {
     var dynamicNotification by store.boolean(
         key = "dynamic_notification",
         defaultValue = true
+    )
+
+    var keepVpnAwake by store.boolean(
+        key = "keep_vpn_awake",
+        defaultValue = false
     )
 
     var appUpdateNotifications by store.boolean(

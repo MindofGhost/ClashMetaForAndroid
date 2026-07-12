@@ -122,6 +122,15 @@ class AppSettingsDesign(
             }
 
             switch(
+                value = srvStore::keepVpnAwake,
+                icon = R.drawable.ic_baseline_flash_on,
+                title = R.string.keep_vpn_awake,
+                summary = R.string.keep_vpn_awake_summary,
+            ) {
+                enabled = !running
+            }
+
+            switch(
                 value = srvStore::appUpdateNotifications,
                 icon = R.drawable.ic_baseline_update,
                 title = R.string.app_update_notifications,

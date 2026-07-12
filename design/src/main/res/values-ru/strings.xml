@@ -120,6 +120,8 @@
     <string name="allow_clash_auto_restart">Разрешить Clash автоматически перезапускаться</string>
     <string name="battery_optimization">Оптимизация батареи</string>
     <string name="battery_optimization_summary">Разрешить Clash работать в фоне без ограничений</string>
+    <string name="keep_vpn_awake">Не давать VPN засыпать</string>
+    <string name="keep_vpn_awake_summary">Не переводить процессор в сон во время работы VPN. Увеличивает расход батареи</string>
     <string name="autostart_settings">Фоновая работа</string>
     <string name="autostart_settings_summary">Открыть настройки автозапуска и фоновых ограничений</string>
 
@@ -144,6 +146,9 @@
     <string name="access_control_mode">Режим контроля доступа</string>
     <string name="access_control_packages">Приложения с контролируемым доступом</string>
     <string name="access_control_packages_summary">Настройте доступ для приложения</string>
+    <string name="tun_pause_packages">Скрывать VPN для приложений</string>
+    <string name="tun_pause_packages_summary">Закрывать TUN и направлять весь трафик устройства напрямую, пока выбранное приложение находится на экране</string>
+    <string name="usage_access_required">Для определения приложения на экране нужен доступ к истории использования</string>
 
     <string name="options_unavailable">Настройки недоступны, пока Clash не будет остановлен</string>
 

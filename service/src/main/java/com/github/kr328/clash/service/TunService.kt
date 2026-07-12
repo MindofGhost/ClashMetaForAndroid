@@ -1,11 +1,14 @@
 package com.github.kr328.clash.service
 
+import android.annotation.SuppressLint
 import android.annotation.TargetApi
 import android.app.PendingIntent
 import android.content.Intent
 import android.net.ProxyInfo
 import android.net.VpnService
 import android.os.Build
+import android.os.PowerManager
+import androidx.core.content.getSystemService
 import com.github.kr328.clash.common.compat.pendingIntentFlags
 import com.github.kr328.clash.common.constants.Components
 import com.github.kr328.clash.common.log.Log
@@ -25,6 +28,7 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
         get() = this
 
     private var reason: String? = null
+    private var keepAwakeLock: PowerManager.WakeLock? = null
 
     private val runtime = clashRuntime {
         val store = ServiceStore(self)
@@ -46,6 +50,13 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
 
         try {
             tun.open()
+            install(TunPauseModule(self) { paused ->
+                if (paused) {
+                    tun.detach()
+                } else if (!tun.isAttached()) {
+                    tun.open()
+                }
+            })
 
             while (isActive) {
                 val quit = select<Boolean> {
@@ -89,6 +100,9 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
 
         StatusProvider.serviceRunning = true
 
+        if (ServiceStore(this).keepVpnAwake)
+            acquireKeepAwakeLock()
+
         StaticNotificationModule.createNotificationChannel(this)
         StaticNotificationModule.notifyLoadingNotification(this)
 
@@ -105,6 +119,12 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
     override fun onDestroy() {
         TunModule.requestStop()
 
+        keepAwakeLock?.runCatching {
+            if (isHeld)
+                release()
+        }
+        keepAwakeLock = null
+
         StatusProvider.serviceRunning = false
 
         sendClashStopped(reason)
@@ -114,6 +134,16 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
         Log.i("TunService destroyed: ${reason ?: "successfully"}")
 
         super.onDestroy()
+    }
+
+    @SuppressLint("WakelockTimeout")
+    private fun acquireKeepAwakeLock() {
+        keepAwakeLock = getSystemService<PowerManager>()
+            ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ClashMetaForAndroid:VPN")
+            ?.apply {
+                setReferenceCounted(false)
+                acquire()
+            }
     }
 
     override fun onTrimMemory(level: Int) {

@@ -22,7 +22,8 @@ class NetworkSettingsDesign(
     running: Boolean,
 ) : Design<NetworkSettingsDesign.Request>(context) {
     enum class Request {
-        StartAccessControlList
+        StartAccessControlList,
+        StartTunPauseList,
     }
 
     private val binding = DesignSettingsCommonBinding
@@ -134,6 +135,15 @@ class NetworkSettingsDesign(
             ) {
                 clicked {
                     requests.trySend(Request.StartAccessControlList)
+                }
+            }
+
+            clickable(
+                title = R.string.tun_pause_packages,
+                summary = R.string.tun_pause_packages_summary,
+            ) {
+                clicked {
+                    requests.trySend(Request.StartTunPauseList)
                 }
             }
 

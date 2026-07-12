@@ -22,21 +22,32 @@ import kotlinx.coroutines.withContext
 class AccessControlActivity : BaseActivity<AccessControlDesign>() {
     override suspend fun main() {
         val service = ServiceStore(this)
+        val tunPauseMode = intent.getBooleanExtra(EXTRA_TUN_PAUSE_MODE, false)
+
+        if (tunPauseMode)
+            title = getString(com.github.kr328.clash.design.R.string.tun_pause_packages)
 
         val selected = withContext(Dispatchers.IO) {
-            service.accessControlPackages.toMutableSet()
+            if (tunPauseMode)
+                service.tunPausePackages.toMutableSet()
+            else
+                service.accessControlPackages.toMutableSet()
         }
 
         defer {
             withContext(Dispatchers.IO) {
-                val changed = selected != service.accessControlPackages
-                service.accessControlPackages = selected
-                if (clashRunning && changed) {
-                    stopClashService()
-                    while (clashRunning) {
-                        delay(200)
+                if (tunPauseMode) {
+                    service.tunPausePackages = selected.toSet()
+                } else {
+                    val changed = selected != service.accessControlPackages
+                    service.accessControlPackages = selected.toSet()
+                    if (clashRunning && changed) {
+                        stopClashService()
+                        while (clashRunning) {
+                            delay(200)
+                        }
+                        startClashService()
                     }
-                    startClashService()
                 }
             }
         }
@@ -153,4 +164,8 @@ class AccessControlActivity : BaseActivity<AccessControlDesign>() {
         get() {
             return applicationInfo?.flags?.and(ApplicationInfo.FLAG_SYSTEM) != 0
         }
+
+    companion object {
+        const val EXTRA_TUN_PAUSE_MODE = "tun_pause_mode"
+    }
 }

@@ -23,6 +23,8 @@ class TunModule(private val vpn: VpnService) : Module<Unit>(vpn) {
 
     private val connectivity = service.getSystemService<ConnectivityManager>()!!
     private val close = Channel<Unit>(Channel.CONFLATED)
+    @Volatile
+    private var attached = false
 
     private fun queryUid(
         protocol: Int,
@@ -41,7 +43,8 @@ class TunModule(private val vpn: VpnService) : Module<Unit>(vpn) {
             return close.receive()
         } finally {
             withContext(NonCancellable) {
-                requestStop()
+                detach()
+                Clash.stopHttp()
             }
         }
     }
@@ -54,6 +57,7 @@ class TunModule(private val vpn: VpnService) : Module<Unit>(vpn) {
         return address?.let(::parseInetSocketAddress)
     }
 
+    @Synchronized
     fun attach(device: TunDevice) {
         Clash.startTun(
             fd = device.fd,
@@ -64,7 +68,19 @@ class TunModule(private val vpn: VpnService) : Module<Unit>(vpn) {
             markSocket = vpn::protect,
             querySocketUid = this::queryUid
         )
+        attached = true
     }
+
+    @Synchronized
+    fun detach() {
+        if (!attached)
+            return
+
+        Clash.stopTun()
+        attached = false
+    }
+
+    fun isAttached(): Boolean = attached
 
     suspend fun close() {
         close.send(Unit)
