@@ -45,6 +45,7 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
     private var resumeWatchdog: Job? = null
     private var runningArgs: List<String>? = null
     private var openedCaptchaUrl: String? = null
+    private var waitingForCaptcha = false
     private var lastAvailableEndpointCount: Int? = null
     private var moduleScope: CoroutineScope? = null
     private val notificationManager = NotificationManagerCompat.from(service)
@@ -73,8 +74,10 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         launch {
             for (ignored in captchaSubmitted) {
                 openedCaptchaUrl = null
+                waitingForCaptcha = false
                 logInfo("VK TURN fallback captcha submitted")
                 cancelCaptchaNotification()
+                scheduleHealthWatchdog("captcha submitted")
             }
         }
 
@@ -189,6 +192,7 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         logWarning("VK TURN fallback expected to run, but core is stopped after $reason; restarting")
         runningArgs = null
         openedCaptchaUrl = null
+        waitingForCaptcha = false
         lastAvailableEndpointCount = 0
         watchdog?.cancel()
         watchdog = null
@@ -200,11 +204,16 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         val args = runningArgs ?: return
         val scope = moduleScope ?: return
 
+        if (waitingForCaptcha) {
+            logInfo("VK TURN fallback health watchdog after $reason postponed: waiting for captcha")
+            return
+        }
+
         resumeWatchdog?.cancel()
         resumeWatchdog = scope.launch {
             delay(HEALTH_WATCHDOG_DELAY)
 
-            if (runningArgs != args)
+            if (runningArgs != args || waitingForCaptcha)
                 return@launch
 
             val coreRunning = runCatching {
@@ -330,6 +339,7 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
             logWarning("VK TURN fallback state was running, but core is stopped; restarting")
             runningArgs = null
             openedCaptchaUrl = null
+            waitingForCaptcha = false
             lastAvailableEndpointCount = 0
             watchdog?.cancel()
             watchdog = null
@@ -354,6 +364,7 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         }.onSuccess {
             runningArgs = args
             logInfo("VK TURN fallback started")
+            scheduleHealthWatchdog("start")
         }.onFailure {
             logWarning("VK TURN fallback start failed: ${it.message}", it)
         }
@@ -364,6 +375,7 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
 
         runningArgs = null
         openedCaptchaUrl = null
+        waitingForCaptcha = false
         lastAvailableEndpointCount = 0
         cancelCaptchaNotification()
 
@@ -461,6 +473,7 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
 
         runningArgs = null
         openedCaptchaUrl = null
+        waitingForCaptcha = false
         lastAvailableEndpointCount = null
         watchdog?.cancel()
         watchdog = null
@@ -553,6 +566,9 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         if (line.contains("ACTION REQUIRED") ||
             line.contains("Triggering manual captcha fallback", ignoreCase = true)) {
             openedCaptchaUrl = null
+            waitingForCaptcha = true
+            resumeWatchdog?.cancel()
+            resumeWatchdog = null
         }
 
         extractCaptchaUrl(line)?.let(::handleCaptchaUrl)
@@ -605,6 +621,10 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
 
     private fun handleCaptchaUrl(captcha: CaptchaUrl) {
         val url = captcha.url
+
+        waitingForCaptcha = true
+        resumeWatchdog?.cancel()
+        resumeWatchdog = null
 
         if (openedCaptchaUrl == url)
             return
