@@ -718,7 +718,7 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         private const val CHECK_INTERVAL = 30_000L
         private const val RUNNING_WATCHDOG_INTERVAL = 15_000L
         private const val HEALTH_WATCHDOG_DELAY = 20_000L
-        private const val HEALTH_CHECK_TIMEOUT = 20_000L
+        private const val HEALTH_CHECK_TIMEOUT = 30_000L
         private const val VK_REACHABILITY_TIMEOUT = 5_000
         private const val UNAVAILABLE_DELAY = 0xffff
         private const val STOP_THRESHOLD = 2
