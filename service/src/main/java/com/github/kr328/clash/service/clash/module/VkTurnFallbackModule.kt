@@ -333,8 +333,10 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
 
     private suspend fun startProcess(args: List<String>) {
         if (runningArgs == args) {
-            if (Clash.isVkTurnRunning())
+            if (Clash.isVkTurnRunning()) {
+                scheduleHealthWatchdog("periodic check with no available endpoints")
                 return
+            }
 
             logWarning("VK TURN fallback state was running, but core is stopped; restarting")
             runningArgs = null

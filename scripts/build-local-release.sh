@@ -37,11 +37,17 @@ VERSION_MINOR="${VERSION_REMAINDER%%.*}"
 VERSION_PATCH="${VERSION_REMAINDER#*.}"
 BASE_VERSION_CODE=$((VERSION_MAJOR * 100000 + VERSION_MINOR * 1000 + VERSION_PATCH))
 
-PATCH_ID="$(
+PATCH_COUNT="$(
   git -C "$ROOT_DIR" rev-list --ancestry-path --count "$BASE_COMMIT"..HEAD 2>/dev/null || echo 0
 )"
+if [ "$PATCH_COUNT" -gt 999 ]; then
+  echo "More than 999 commits since $BASE_TAG; create a new base tag before building" >&2
+  exit 1
+fi
+
+BASE_VERSION_CODE=$((BASE_VERSION_CODE * 1000 + PATCH_COUNT))
 COMMIT_ID="$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo local)"
-PATCH_ID="$PATCH_ID-$COMMIT_ID"
+PATCH_ID="$PATCH_COUNT-$COMMIT_ID"
 
 if ! git -C "$ROOT_DIR" diff --quiet --ignore-submodules=dirty 2>/dev/null ||
    ! git -C "$ROOT_DIR" diff --cached --quiet --ignore-submodules=dirty 2>/dev/null; then

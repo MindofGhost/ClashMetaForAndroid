@@ -32,6 +32,9 @@ subprojects {
     val customVersionName = System.getenv("RELEASE_TAG")
         ?.removePrefix("v")
         ?.takeIf { it.startsWith("$baseVersionName-") }
+    val customVersionCode = System.getenv("BASE_VERSION_CODE")
+        ?.toIntOrNull()
+        ?.takeIf { it > 0 }
 
     apply(plugin = if (isApp) "com.android.application" else "com.android.library")
 
@@ -63,7 +66,7 @@ subprojects {
             targetSdk = 35
 
             versionName = customVersionName ?: baseVersionName
-            versionCode = 211031
+            versionCode = customVersionCode ?: 211031
 
             resValue("string", "release_name", "v$versionName")
             resValue("integer", "release_code", "$versionCode")
