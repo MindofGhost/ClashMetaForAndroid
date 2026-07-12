@@ -63,7 +63,13 @@ object Bridge {
     external fun nativeToPublicKeys(secretKeys: String): String?
     external fun nativeVerityPublicKeys(publicKeys: String): Boolean
 
-    private external fun nativeInit(home: String, versionName: String, sdkVersion: Int, hwid: String)
+    private external fun nativeInit(
+        home: String,
+        cache: String,
+        versionName: String,
+        sdkVersion: Int,
+        hwid: String,
+    )
 
     init {
         System.loadLibrary("bridge")
@@ -74,12 +80,13 @@ object Bridge {
             .detachFd()
 
         val home = ctx.filesDir.resolve("clash").apply { mkdirs() }.absolutePath
+        val cache = ctx.cacheDir.absolutePath
         val versionName = ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: "unknown"
         val sdkVersion = Build.VERSION.SDK_INT
         val hwid = ctx.hwid
 
         Log.d("Home = $home")
 
-        nativeInit(home, versionName, sdkVersion, hwid)
+        nativeInit(home, cache, versionName, sdkVersion, hwid)
     }
 }

@@ -18,7 +18,7 @@ import (
 
 var errBlocked = errors.New("blocked")
 
-func Init(home, versionName, gitVersion string, platformVersion int, hwid string) {
+func Init(home, cache, versionName, gitVersion string, platformVersion int, hwid string) {
 	log.Infoln("Init core, home: %s, versionName: %s, gitVersion: %s, platformVersion: %d", home, versionName, gitVersion, platformVersion)
 	constant.SetHomeDir(home)
 	// gitVersion = ${CURRENT_BRANCH}_${COMMIT_HASH}_${COMPILE_TIME}
@@ -30,6 +30,7 @@ func Init(home, versionName, gitVersion string, platformVersion int, hwid string
 	}
 	constant.Version = strings.ToLower(constant.Version)
 	app.ApplyVersionName(versionName)
+	app.ApplyCacheDir(cache)
 	app.ApplyPlatformVersion(platformVersion)
 	app.ApplyHwid(hwid)
 

@@ -8,6 +8,7 @@ import (
 
 var appVersionName string
 var appHwid string
+var appCacheDir string
 var platformVersion int
 var installedAppsUid = map[int]string{}
 
@@ -23,12 +24,20 @@ func ApplyHwid(hwid string) {
 	appHwid = hwid
 }
 
+func ApplyCacheDir(cacheDir string) {
+	appCacheDir = cacheDir
+}
+
 func VersionName() string {
 	return appVersionName
 }
 
 func Hwid() string {
 	return appHwid
+}
+
+func CacheDir() string {
+	return appCacheDir
 }
 
 func PlatformVersion() int {
