@@ -317,13 +317,8 @@
 
     <string name="sniffer_setting">Настройки перехвата доменов</string>
     <string name="sniffer">Перехват доменов</string>
-    <string name="sniffing">Режим перехвата доменов</string>
     <string name="force_domain">Принудительный перехват доменов</string>
     <string name="skip_domain">Исключения перехвата доменов</string>
-    <string name="port_whitelist">Список портов для перехвата</string>
-    <string name="disable_sniffer">Отключить перехват доменов</string>
-    <string name="sniffer_config">Использовать перехват доменов из конфига</string>
-    <string name="sniffer_override">Переопределить настройки перехвата доменов</string>
 
     <string name="geox_url_setting">Настройка GeoX URL</string>
     <string name="geox_geoip">GeoIP URL</string>

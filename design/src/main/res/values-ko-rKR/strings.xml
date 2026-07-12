@@ -234,13 +234,8 @@
     <string name="find_process_mode">프로세스 모드 찾기</string>
     <string name="sniffer_setting">Sniffer 설정</string>
     <string name="sniffer">Sniffer</string>
-    <string name="sniffing">Sniffer 모드</string>
     <string name="force_domain">강제 도메인</string>
     <string name="skip_domain">도메인 건너뛰기</string>
-    <string name="port_whitelist">포트 화이트리스트</string>
-    <string name="disable_sniffer">Sniffer 끔</string>
-    <string name="sniffer_config">구성에서 Sniffer 불러오기</string>
-    <string name="sniffer_override">Sniffer 구성 재정의</string>
     <string name="geox_url_setting">GeoX Url 설정</string>
     <string name="geox_geoip">GeoIP Url</string>
     <string name="geox_mmdb">MMDB Url</string>

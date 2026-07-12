@@ -94,6 +94,7 @@ subprojects {
 
         if (isApp) {
             packagingOptions {
+                jniLibs.useLegacyPackaging = true
                 resources {
                     excludes.add("DebugProbesKt.bin")
                 }

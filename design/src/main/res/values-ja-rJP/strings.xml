@@ -234,13 +234,8 @@
     <string name="find_process_mode">Find Process Mode</string>
     <string name="sniffer_setting">Sniffer Setting</string>
     <string name="sniffer">Sniffer</string>
-    <string name="sniffing">Sniffer Mode</string>
     <string name="force_domain">Force Domain</string>
     <string name="skip_domain">Skip Domain</string>
-    <string name="port_whitelist">Port Whitelist</string>
-    <string name="disable_sniffer">Disable Sniffer</string>
-    <string name="sniffer_config">Load Sniffer From Config</string>
-    <string name="sniffer_override">Override Sniffer Config</string>
     <string name="geox_url_setting">GeoX URL Setting</string>
     <string name="geox_geoip">GeoIP URL</string>
     <string name="geox_mmdb">MMDB URL</string>

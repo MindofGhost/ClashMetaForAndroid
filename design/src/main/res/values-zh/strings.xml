@@ -243,7 +243,6 @@
     <string name="find_process_mode">查找进程模式</string>
     <string name="sniffer_setting">嗅探设置</string>
     <string name="sniffer">嗅探器</string>
-    <string name="sniff">嗅探</string>
     <string name="force_dns_mapping">强制 DNS 映射</string>
     <string name="parse_pure_ip">解析纯 IP 连接</string>
     <string name="override_destination">覆盖目标地址</string>
