@@ -12,32 +12,34 @@ if [ -z "$BRANCH_NAME" ]; then
 fi
 BRANCH_NAME="$(printf '%s' "$BRANCH_NAME" | sed 's#[^A-Za-z0-9._-]#-#g')"
 
-BASE_REF="${BASE_REF:-}"
-if [ -z "$BASE_REF" ]; then
-  if git -C "$ROOT_DIR" show-ref --verify --quiet refs/remotes/origin/main; then
-    BASE_REF="origin/main"
-  elif git -C "$ROOT_DIR" show-ref --verify --quiet refs/heads/main; then
-    BASE_REF="main"
-  elif git -C "$ROOT_DIR" show-ref --verify --quiet refs/remotes/origin/master; then
-    BASE_REF="origin/master"
-  elif git -C "$ROOT_DIR" show-ref --verify --quiet refs/heads/master; then
-    BASE_REF="master"
-  else
-    BASE_REF="$(git -C "$ROOT_DIR" describe --tags --abbrev=0 2>/dev/null || true)"
-  fi
+BASE_TAG="${BASE_TAG:-$(
+  git -C "$ROOT_DIR" tag --merged HEAD --sort=-v:refname 2>/dev/null |
+    sed -n '/^v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*$/ { p; q; }'
+)}"
+if [ -z "$BASE_TAG" ]; then
+  echo "No reachable semantic version tag found (expected vMAJOR.MINOR.PATCH)" >&2
+  exit 1
+fi
+if ! git -C "$ROOT_DIR" rev-parse --verify --quiet "$BASE_TAG^{commit}" >/dev/null; then
+  echo "Invalid BASE_TAG: $BASE_TAG" >&2
+  exit 1
 fi
 
-if [ -n "$BASE_REF" ]; then
-  BASE_COMMIT="$(git -C "$ROOT_DIR" merge-base HEAD "$BASE_REF" 2>/dev/null || true)"
-else
-  BASE_COMMIT=""
+BASE_COMMIT="$(git -C "$ROOT_DIR" rev-list -n 1 "$BASE_TAG")"
+if ! git -C "$ROOT_DIR" merge-base --is-ancestor "$BASE_COMMIT" HEAD; then
+  echo "BASE_TAG $BASE_TAG is not reachable from HEAD" >&2
+  exit 1
 fi
+BASE_VERSION_NAME="${BASE_TAG#v}"
+VERSION_MAJOR="${BASE_VERSION_NAME%%.*}"
+VERSION_REMAINDER="${BASE_VERSION_NAME#*.}"
+VERSION_MINOR="${VERSION_REMAINDER%%.*}"
+VERSION_PATCH="${VERSION_REMAINDER#*.}"
+BASE_VERSION_CODE=$((VERSION_MAJOR * 100000 + VERSION_MINOR * 1000 + VERSION_PATCH))
 
-if [ -n "$BASE_COMMIT" ]; then
-  PATCH_ID="$(git -C "$ROOT_DIR" rev-list --count "$BASE_COMMIT"..HEAD 2>/dev/null || echo 0)"
-else
-  PATCH_ID="$(git -C "$ROOT_DIR" rev-list --count HEAD 2>/dev/null || echo 0)"
-fi
+PATCH_ID="$(
+  git -C "$ROOT_DIR" rev-list --ancestry-path --count "$BASE_COMMIT"..HEAD 2>/dev/null || echo 0
+)"
 COMMIT_ID="$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo local)"
 PATCH_ID="$PATCH_ID-$COMMIT_ID"
 
@@ -45,7 +47,7 @@ if ! git -C "$ROOT_DIR" diff --quiet --ignore-submodules=dirty 2>/dev/null ||
    ! git -C "$ROOT_DIR" diff --cached --quiet --ignore-submodules=dirty 2>/dev/null; then
   PATCH_ID="$PATCH_ID-dirty"
 fi
-RELEASE_TAG="${RELEASE_TAG:-v2.11.30-$BRANCH_NAME-$PATCH_ID}"
+RELEASE_TAG="${RELEASE_TAG:-$BASE_TAG-$BRANCH_NAME-$PATCH_ID}"
 FLAVOR="${FLAVOR:-meta}"
 BUILD_TYPE="${BUILD_TYPE:-Release}"
 
@@ -72,6 +74,8 @@ fi
 
 export SIGNING_PROPERTIES
 export RELEASE_TAG
+export BASE_VERSION_NAME
+export BASE_VERSION_CODE
 export FLAVOR
 export BUILD_TYPE
 export GENERATE_SIGNING_KEY

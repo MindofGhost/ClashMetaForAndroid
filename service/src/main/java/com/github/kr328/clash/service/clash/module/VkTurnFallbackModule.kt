@@ -313,7 +313,7 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
     }
 
     private fun isAvailableEndpoint(proxy: Proxy): Boolean {
-        if (proxy.type.group)
+        if (proxy.isGroup)
             return false
 
         if (proxy.type in NON_ENDPOINT_TYPES)
@@ -705,14 +705,14 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         private const val VK_TURN_LOG_PREFIX = "[VK_TURN]"
 
         private val NON_ENDPOINT_TYPES = setOf(
-            Proxy.Type.Direct,
-            Proxy.Type.Reject,
-            Proxy.Type.RejectDrop,
-            Proxy.Type.Compatible,
-            Proxy.Type.Pass,
-            Proxy.Type.PassRule,
-            Proxy.Type.Dns,
-            Proxy.Type.Unknown,
+            "Direct",
+            "Reject",
+            "RejectDrop",
+            "Compatible",
+            "Pass",
+            "PassRule",
+            "Dns",
+            "Unknown",
         )
 
         private val CAPTCHA_URL_MARKERS = listOf(

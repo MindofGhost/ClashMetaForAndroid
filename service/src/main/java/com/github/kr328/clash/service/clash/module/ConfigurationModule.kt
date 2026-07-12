@@ -4,7 +4,6 @@ import android.app.Service
 import com.github.kr328.clash.common.constants.Intents
 import com.github.kr328.clash.common.log.Log
 import com.github.kr328.clash.core.Clash
-import com.github.kr328.clash.core.model.Proxy
 import com.github.kr328.clash.core.model.ProxySort
 import com.github.kr328.clash.service.StatusProvider
 import com.github.kr328.clash.service.data.ImportedDao
@@ -120,9 +119,9 @@ class ConfigurationModule(service: Service) : Module<ConfigurationModule.LoadExc
         runCatching {
             val dao = SelectionDao()
             val selectableTypes = setOf(
-                Proxy.Type.Selector,
-                Proxy.Type.Fallback,
-                Proxy.Type.URLTest,
+                "Selector",
+                "Fallback",
+                "URLTest",
             )
 
             Clash.queryGroupNames(false)
