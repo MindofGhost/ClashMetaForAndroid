@@ -3,7 +3,10 @@ package com.github.kr328.clash.service.clash.module
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
+import androidx.core.content.getSystemService
 import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -28,9 +31,14 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import java.net.InetSocketAddress
+import java.net.Socket
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.SSLSocketFactory
 
 class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
     private val store = ServiceStore(service)
+    private val connectivity = service.getSystemService<ConnectivityManager>()
 
     private var logcat: Job? = null
     private var watchdog: Job? = null
@@ -168,7 +176,7 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         }
     }
 
-    private fun restartIfExpectedButStopped(reason: String) {
+    private suspend fun restartIfExpectedButStopped(reason: String) {
         val args = runningArgs ?: return
 
         val coreRunning = runCatching {
@@ -314,7 +322,7 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         return proxy.delay in 1 until UNAVAILABLE_DELAY
     }
 
-    private fun startProcess(args: List<String>) {
+    private suspend fun startProcess(args: List<String>) {
         if (runningArgs == args) {
             if (Clash.isVkTurnRunning())
                 return
@@ -331,6 +339,14 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         if (runningArgs != null)
             stopProcess("fallback arguments changed")
 
+        val vkLink = findArgument(args, "-vk-link")
+        if (vkLink != null && !isVkLinkReachable(vkLink)) {
+            logWarning(
+                "VK TURN fallback start postponed: ${Uri.parse(vkLink).host ?: vkLink} is unavailable"
+            )
+            return
+        }
+
         runCatching {
             logInfo("VK TURN fallback starting in core: ${args.joinToString(" ")}")
 
@@ -343,7 +359,7 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         }
     }
 
-    private fun restartProcess(args: List<String>, reason: String) {
+    private suspend fun restartProcess(args: List<String>, reason: String) {
         logInfo("VK TURN fallback restarting: $reason")
 
         runningArgs = null
@@ -358,6 +374,81 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         }
 
         startProcess(args)
+    }
+
+    private fun findArgument(args: List<String>, name: String): String? {
+        args.forEachIndexed { index, argument ->
+            when {
+                argument == name -> return args.getOrNull(index + 1)
+                argument.startsWith("$name=") -> return argument.substringAfter('=')
+            }
+        }
+
+        return null
+    }
+
+    private suspend fun isVkLinkReachable(link: String): Boolean = withContext(Dispatchers.IO) {
+        val uri = runCatching { Uri.parse(link) }.getOrNull() ?: return@withContext false
+        val host = uri.host?.takeIf { it.isNotBlank() } ?: return@withContext false
+        val port = uri.port.takeIf { it > 0 } ?: when (uri.scheme?.lowercase()) {
+            "http" -> 80
+            else -> 443
+        }
+
+        val physicalNetworks = connectivity?.allNetworks.orEmpty().filter { network ->
+            connectivity?.getNetworkCapabilities(network)?.let { capabilities ->
+                capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                        !capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+            } == true
+        }
+
+        runCatching {
+            val networkTargets = physicalNetworks.flatMap { network ->
+                runCatching { network.getAllByName(host).toList() }
+                    .getOrDefault(emptyList())
+                    .mapNotNull { address ->
+                        address.hostAddress?.let { network to it }
+                    }
+            }
+
+            check(networkTargets.isNotEmpty()) { "no physical network can resolve $host" }
+
+            var lastError: Throwable? = null
+            for ((network, address) in networkTargets) {
+                val connected = runCatching {
+                    network.socketFactory.createSocket().use { socket ->
+                        checkReachabilitySocket(socket, host, address, port, uri)
+                    }
+                }.onFailure { lastError = it }.isSuccess
+
+                if (connected)
+                    return@runCatching
+            }
+
+            throw lastError ?: IllegalStateException("unable to connect to $host")
+        }.onFailure {
+            logInfo("VK TURN fallback reachability check failed for $host:$port: ${it.message}")
+        }.isSuccess
+    }
+
+    private fun checkReachabilitySocket(
+        socket: Socket,
+        tlsHost: String,
+        address: String,
+        port: Int,
+        uri: Uri,
+    ) {
+        socket.connect(InetSocketAddress(address, port), VK_REACHABILITY_TIMEOUT)
+        socket.soTimeout = VK_REACHABILITY_TIMEOUT
+
+        if (uri.scheme.equals("https", ignoreCase = true)) {
+            val tls = (SSLSocketFactory.getDefault() as SSLSocketFactory)
+                .createSocket(socket, tlsHost, port, false) as SSLSocket
+            tls.use {
+                it.soTimeout = VK_REACHABILITY_TIMEOUT
+                it.startHandshake()
+            }
+        }
     }
 
     private fun stopProcess(reason: String) {
@@ -608,6 +699,7 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         private const val RUNNING_WATCHDOG_INTERVAL = 15_000L
         private const val HEALTH_WATCHDOG_DELAY = 20_000L
         private const val HEALTH_CHECK_TIMEOUT = 20_000L
+        private const val VK_REACHABILITY_TIMEOUT = 5_000
         private const val UNAVAILABLE_DELAY = 0xffff
         private const val STOP_THRESHOLD = 2
         private const val VK_TURN_LOG_PREFIX = "[VK_TURN]"
