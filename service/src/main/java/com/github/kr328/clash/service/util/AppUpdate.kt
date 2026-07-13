@@ -40,6 +40,11 @@ suspend fun Context.handleAppUpdateHeaders(source: String, headers: Subscription
         return
     }
 
+    // A subscription refresh must not treat the partially downloaded APK as invalid
+    // or replace the progress notification while the download is still active.
+    if (appUpdateDownloadLock.isLocked)
+        return
+
     val template = headers?.appUpdateUrl
     val expectedCert = headers?.appUpdateCertSha256
 
@@ -86,7 +91,7 @@ suspend fun Context.downloadAndInstallAppUpdate(url: String, expectedCert: Strin
             mkdirs()
         }
         val apk = appUpdateApk
-        val client = appUpdateClient()
+        val client = appUpdateDownloadClient()
         val request = Request.Builder()
             .url(url)
             .get()
@@ -137,7 +142,7 @@ suspend fun Context.downloadAndInstallAppUpdate(url: String, expectedCert: Strin
             showAppUpdateReadyNotification()
         } catch (e: Exception) {
             apk.delete()
-            cancelAvailableAppUpdateNotification()
+            showAppUpdateNotification(url, expectedCert)
             throw e
         }
     } finally {
@@ -429,6 +434,16 @@ private fun appUpdateClient(): OkHttpClient {
         .callTimeout(30, TimeUnit.SECONDS)
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .followSslRedirects(true)
+        .build()
+}
+
+private fun appUpdateDownloadClient(): OkHttpClient {
+    return OkHttpClient.Builder()
+        .callTimeout(0, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
         .followRedirects(true)
         .followSslRedirects(true)
         .build()
