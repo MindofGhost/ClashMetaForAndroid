@@ -104,6 +104,13 @@ object Clash {
         Bridge.nativeStartVkTurn(quoteCommandLine(args))
     }
 
+    fun resolveVkTurnHost(host: String): List<String> {
+        return Bridge.nativeResolveVkTurnHost(host)
+            ?.split(',')
+            ?.filter { it.isNotBlank() }
+            .orEmpty()
+    }
+
     fun subscribeVkTurnEvents(): ReceiveChannel<String> {
         return Channel<String>(Channel.UNLIMITED).apply {
             Bridge.nativeSubscribeVkTurnEvents(object : LogcatInterface {

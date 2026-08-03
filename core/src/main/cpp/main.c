@@ -171,6 +171,20 @@ Java_com_github_kr328_clash_core_bridge_Bridge_nativeStartVkTurn(JNIEnv *env, jo
     startVkTurn(_args);
 }
 
+JNIEXPORT jstring JNICALL
+Java_com_github_kr328_clash_core_bridge_Bridge_nativeResolveVkTurnHost(JNIEnv *env, jobject thiz,
+                                                                       jstring host) {
+    TRACE_METHOD();
+
+    scoped_string _host = get_string(host);
+    scoped_string addresses = resolveVkTurnHost(_host);
+
+    if (addresses == NULL)
+        return NULL;
+
+    return new_string(addresses);
+}
+
 JNIEXPORT void JNICALL
 Java_com_github_kr328_clash_core_bridge_Bridge_nativeSubscribeVkTurnEvents(JNIEnv *env, jobject thiz,
                                                                            jobject callback) {

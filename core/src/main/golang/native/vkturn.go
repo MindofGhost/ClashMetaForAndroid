@@ -9,6 +9,7 @@ import (
 	stdlog "log"
 	"strings"
 	"sync"
+	"time"
 	"unsafe"
 
 	"cfa/native/vkturn"
@@ -169,6 +170,20 @@ func startVkTurn(args C.c_string) {
 		}
 		vkTurnRuntime.Unlock()
 	}()
+}
+
+//export resolveVkTurnHost
+func resolveVkTurnHost(host C.c_string) *C.char {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	addresses, err := vkturn.ResolveHost(ctx, C.GoString(host))
+	if err != nil {
+		log.Infoln("[VK_TURN] resolver failed: %s", err.Error())
+		return nil
+	}
+
+	return C.CString(strings.Join(addresses, ","))
 }
 
 //export stopVkTurn

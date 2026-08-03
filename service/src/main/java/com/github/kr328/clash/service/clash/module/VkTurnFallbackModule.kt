@@ -421,15 +421,14 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         }
 
         runCatching {
+            val addresses = Clash.resolveVkTurnHost(host)
+            check(addresses.isNotEmpty()) { "VK TURN resolver cannot resolve $host" }
+
             val networkTargets = physicalNetworks.flatMap { network ->
-                runCatching { network.getAllByName(host).toList() }
-                    .getOrDefault(emptyList())
-                    .mapNotNull { address ->
-                        address.hostAddress?.let { network to it }
-                    }
+                addresses.map { address -> network to address }
             }
 
-            check(networkTargets.isNotEmpty()) { "no physical network can resolve $host" }
+            check(networkTargets.isNotEmpty()) { "no physical network available for $host" }
 
             var lastError: Throwable? = null
             for ((network, address) in networkTargets) {
