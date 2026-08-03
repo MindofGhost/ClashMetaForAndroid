@@ -129,7 +129,7 @@
     <string name="battery_optimization">Battery Optimization</string>
     <string name="battery_optimization_summary">Allow Clash to keep running in the background</string>
     <string name="keep_vpn_awake">Keep VPN awake</string>
-    <string name="keep_vpn_awake_summary">Prevent CPU sleep while VPN is running. Increases battery usage</string>
+    <string name="keep_vpn_awake_summary">Keep CPU awake and periodically restore the VPN service. Increases battery usage</string>
     <string name="autostart_settings">Background Activity</string>
     <string name="autostart_settings_summary">Open device settings for autostart and background restrictions</string>
 

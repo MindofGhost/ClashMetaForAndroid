@@ -5,7 +5,6 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import androidx.core.content.getSystemService
 import com.github.kr328.clash.common.Global
 import com.github.kr328.clash.common.compat.pendingIntentFlags
@@ -120,7 +119,7 @@ class ProfileReceiver : BroadcastReceiver() {
         private fun pendingIntentOf(
             context: Context,
             imported: Imported,
-            forceReload: Boolean = false
+            forceReload: Boolean = false,
         ): PendingIntent {
             val intent = Intent(Intents.ACTION_PROFILE_REQUEST_UPDATE)
                 .setComponent(ProfileReceiver::class.componentName)
@@ -136,15 +135,7 @@ class ProfileReceiver : BroadcastReceiver() {
         }
 
         private fun AlarmManager.scheduleCompat(at: Long, intent: PendingIntent) {
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, intent)
-                } else {
-                    set(AlarmManager.RTC_WAKEUP, at, intent)
-                }
-            } catch (_: Exception) {
-                set(AlarmManager.RTC, at, intent)
-            }
+            set(AlarmManager.RTC, at, intent)
         }
 
         private val RETRY_DELAY = TimeUnit.MINUTES.toMillis(15)

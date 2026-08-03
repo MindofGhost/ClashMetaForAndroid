@@ -100,5 +100,16 @@
                 <data android:scheme="uuid" />
             </intent-filter>
         </receiver>
+
+        <receiver
+            android:name=".VpnKeepAliveReceiver"
+            android:enabled="true"
+            android:exported="false"
+            android:process=":background">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

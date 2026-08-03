@@ -44,6 +44,9 @@ class AppSettingsActivity : BaseActivity<AppSettingsDesign>(), Behavior {
                         AppSettingsDesign.Request.RequestIgnoreBatteryOptimizations -> {
                             openBatteryOptimizationRequest()
                         }
+                        AppSettingsDesign.Request.EnsureIgnoreBatteryOptimizations -> {
+                            requestIgnoreBatteryOptimizations()
+                        }
                         AppSettingsDesign.Request.OpenAutostartSettings -> {
                             openAutostartSettings()
                         }

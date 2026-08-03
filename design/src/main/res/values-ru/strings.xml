@@ -121,7 +121,7 @@
     <string name="battery_optimization">Оптимизация батареи</string>
     <string name="battery_optimization_summary">Разрешить Clash работать в фоне без ограничений</string>
     <string name="keep_vpn_awake">Не давать VPN засыпать</string>
-    <string name="keep_vpn_awake_summary">Не переводить процессор в сон во время работы VPN. Увеличивает расход батареи</string>
+    <string name="keep_vpn_awake_summary">Не усыплять процессор и периодически восстанавливать VPN-сервис. Увеличивает расход батареи</string>
     <string name="autostart_settings">Фоновая работа</string>
     <string name="autostart_settings_summary">Открыть настройки автозапуска и фоновых ограничений</string>
 

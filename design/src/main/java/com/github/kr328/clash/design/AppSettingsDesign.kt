@@ -24,6 +24,7 @@ class AppSettingsDesign(
     enum class Request {
         ReCreateAllActivities,
         RequestIgnoreBatteryOptimizations,
+        EnsureIgnoreBatteryOptimizations,
         OpenAutostartSettings,
     }
 
@@ -119,6 +120,10 @@ class AppSettingsDesign(
                 summary = R.string.show_traffic_summary
             ) {
                 enabled = !running
+                listener = OnChangedListener {
+                    if (srvStore.keepVpnAwake)
+                        requests.trySend(Request.EnsureIgnoreBatteryOptimizations)
+                }
             }
 
             switch(

@@ -7,15 +7,17 @@ import androidx.core.content.getSystemService
 import com.github.kr328.clash.common.log.Log
 import com.github.kr328.clash.core.Clash
 import com.github.kr328.clash.service.ProfileWorker
+import com.github.kr328.clash.service.store.ServiceStore
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withContext
 
 class SuspendModule(service: Service) : Module<Unit>(service) {
     override suspend fun run() {
+        val keepVpnAwake = ServiceStore(service).keepVpnAwake
         val interactive = service.getSystemService<PowerManager>()?.isInteractive ?: true
 
-        Clash.suspendCore(!interactive)
+        Clash.suspendCore(!interactive && !keepVpnAwake)
 
         val screenToggle = receiveBroadcast(false, Channel.CONFLATED) {
             addAction(Intent.ACTION_SCREEN_ON)
@@ -32,9 +34,9 @@ class SuspendModule(service: Service) : Module<Unit>(service) {
                         Log.d("Clash resumed")
                     }
                     Intent.ACTION_SCREEN_OFF -> {
-                        Clash.suspendCore(true)
+                        Clash.suspendCore(!keepVpnAwake)
 
-                        Log.d("Clash suspended")
+                        Log.d(if (keepVpnAwake) "Clash kept awake" else "Clash suspended")
                     }
                     else -> {
                         // unreachable

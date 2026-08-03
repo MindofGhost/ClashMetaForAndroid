@@ -80,22 +80,24 @@ class ProfileWorker : BaseService() {
             Intents.ACTION_PROFILE_SCHEDULE_UPDATES -> {
                 val job = launch {
                     ProfileReceiver.rescheduleAll(service)
-
-                    delay(TimeUnit.SECONDS.toMillis(30))
                 }
 
                 enqueueJob(job)
             }
             Intents.ACTION_PROFILE_UPDATE_ON_START -> {
                 val job = launch {
-                    updateAutoProfilesOnStart()
+                    updateStaleProfiles(allowWhenVpnStopped = true)
                 }
 
                 enqueueJob(job)
             }
             Intents.ACTION_PROFILE_UPDATE_STALE -> {
+                val allowWhenVpnStopped = intent.getBooleanExtra(
+                    Intents.EXTRA_ALLOW_WHEN_VPN_STOPPED,
+                    false,
+                )
                 val job = launch {
-                    updateStaleProfiles()
+                    updateStaleProfiles(allowWhenVpnStopped)
                 }
 
                 enqueueJob(job)
@@ -143,25 +145,20 @@ class ProfileWorker : BaseService() {
         }
     }
 
-    private suspend fun updateAutoProfilesOnStart() {
-        ImportedDao().queryAllUUIDs()
-            .mapNotNull { ImportedDao().queryByUUID(it) }
-            .filter { it.type != Profile.Type.File }
-            .filter { it.interval >= TimeUnit.MINUTES.toMillis(15) }
-            .forEach { runDeduplicated(it.uuid, "startup") }
-    }
+    private suspend fun updateStaleProfiles(allowWhenVpnStopped: Boolean) {
+        if (!allowWhenVpnStopped && !StatusProvider.serviceRunning) {
+            Log.i("Skip stale profile update while VPN is stopped")
+            return
+        }
 
-    private suspend fun updateStaleProfiles() {
         val current = System.currentTimeMillis()
 
         ImportedDao().queryAllUUIDs()
             .mapNotNull { ImportedDao().queryByUUID(it) }
             .filter { it.type != Profile.Type.File }
             .filter { it.interval >= TimeUnit.MINUTES.toMillis(15) }
+            .filter { current >= (retryProfileUpdatesAfter[it.uuid] ?: 0L) }
             .filter {
-                if (failedUpdateProfiles.contains(it.uuid))
-                    return@filter true
-
                 val last = importedDir
                     .resolve(it.uuid.toString())
                     .resolve("config.yaml")
@@ -197,13 +194,14 @@ class ProfileWorker : BaseService() {
             }
 
             completed(imported.uuid)
-            failedUpdateProfiles.remove(imported.uuid)
+            retryProfileUpdatesAfter.remove(imported.uuid)
 
             ImportedDao().queryByUUID(imported.uuid)?.let {
                 ProfileReceiver.scheduleNext(this, it)
             }
         } catch (e: Exception) {
-            failedUpdateProfiles.add(imported.uuid)
+            retryProfileUpdatesAfter[imported.uuid] =
+                System.currentTimeMillis() + PROFILE_RETRY_COOLDOWN
 
             ImportedDao().queryByUUID(imported.uuid)?.let {
                 ProfileReceiver.scheduleRetry(this, it)
@@ -344,25 +342,34 @@ class ProfileWorker : BaseService() {
         private const val RESULT_CHANNEL = "profile_result_channel"
         private const val MAX_UPDATE_ATTEMPTS = 3
         private val UPDATE_ATTEMPT_TIMEOUT = TimeUnit.MINUTES.toMillis(4)
-        private val STALE_UPDATE_REQUEST_INTERVAL = TimeUnit.MINUTES.toMillis(1)
+        private val STALE_UPDATE_REQUEST_INTERVAL = TimeUnit.MINUTES.toMillis(5)
+        private val PROFILE_RETRY_COOLDOWN = TimeUnit.MINUTES.toMillis(15)
         @Volatile
         private var lastStaleUpdateRequest = 0L
         private val pendingProfileUpdates = Collections.synchronizedSet(mutableSetOf<UUID>())
-        private val failedUpdateProfiles = Collections.synchronizedSet(mutableSetOf<UUID>())
+        private val retryProfileUpdatesAfter = Collections.synchronizedMap(mutableMapOf<UUID, Long>())
         private val RETRY_DELAYS = longArrayOf(
             TimeUnit.SECONDS.toMillis(10),
             TimeUnit.SECONDS.toMillis(30),
         )
 
-        fun requestUpdateStale(context: android.content.Context) {
+        fun requestUpdateStale(
+            context: android.content.Context,
+            allowWhenVpnStopped: Boolean = false,
+            immediate: Boolean = false,
+        ) {
+            if (!allowWhenVpnStopped && !StatusProvider.serviceRunning)
+                return
+
             val current = System.currentTimeMillis()
-            if (current - lastStaleUpdateRequest < STALE_UPDATE_REQUEST_INTERVAL)
+            if (!immediate && current - lastStaleUpdateRequest < STALE_UPDATE_REQUEST_INTERVAL)
                 return
 
             lastStaleUpdateRequest = current
 
             val service = Intent(Intents.ACTION_PROFILE_UPDATE_STALE)
                 .setComponent(ProfileWorker::class.componentName)
+                .putExtra(Intents.EXTRA_ALLOW_WHEN_VPN_STOPPED, allowWhenVpnStopped)
 
             runCatching {
                 context.startForegroundServiceCompat(service)

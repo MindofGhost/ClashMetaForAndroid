@@ -28,6 +28,7 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
         get() = this
 
     private var reason: String? = null
+    private var userRequestedStop = false
     private var keepAwakeLock: PowerManager.WakeLock? = null
 
     private val runtime = clashRuntime {
@@ -61,6 +62,8 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
             while (isActive) {
                 val quit = select<Boolean> {
                     close.onEvent {
+                        userRequestedStop = true
+
                         true
                     }
                     config.onEvent {
@@ -100,8 +103,10 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
 
         StatusProvider.serviceRunning = true
 
-        if (ServiceStore(this).keepVpnAwake)
+        if (ServiceStore(this).keepVpnAwake) {
             acquireKeepAwakeLock()
+            VpnKeepAliveReceiver.schedule(this)
+        }
 
         StaticNotificationModule.createNotificationChannel(this)
         StaticNotificationModule.notifyLoadingNotification(this)
@@ -125,7 +130,17 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
         }
         keepAwakeLock = null
 
+        val keepAliveEnabled = ServiceStore(this).keepVpnAwake && !userRequestedStop
+
         StatusProvider.serviceRunning = false
+        if (keepAliveEnabled) {
+            // serviceRunning=false clears the persisted desired state. Restore it for
+            // unexpected shutdowns so the watchdog can bring the VPN back.
+            StatusProvider.shouldStartClashOnBoot = true
+            VpnKeepAliveReceiver.schedule(this)
+        } else {
+            VpnKeepAliveReceiver.cancel(this)
+        }
 
         sendClashStopped(reason)
 
@@ -138,12 +153,19 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
 
     @SuppressLint("WakelockTimeout")
     private fun acquireKeepAwakeLock() {
-        keepAwakeLock = getSystemService<PowerManager>()
+        val lock = getSystemService<PowerManager>()
             ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ClashMetaForAndroid:VPN")
             ?.apply {
                 setReferenceCounted(false)
                 acquire()
             }
+
+        keepAwakeLock = lock
+
+        if (lock?.isHeld == true)
+            Log.i("VPN keep-awake lock acquired")
+        else
+            Log.w("VPN keep-awake lock could not be acquired")
     }
 
     override fun onTrimMemory(level: Int) {

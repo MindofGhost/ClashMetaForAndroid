@@ -37,7 +37,7 @@ object Remote {
                 Log.d("App becomes visible")
                 service.bind()
                 broadcasts.register()
-                requestStaleProfileUpdates()
+                requestStaleProfileUpdates(immediate = true)
             }
             else {
                 Log.d("App becomes invisible")
@@ -51,8 +51,12 @@ object Remote {
         }
     }
 
-    fun requestStaleProfileUpdates() {
-        ProfileWorker.requestUpdateStale(Global.application)
+    fun requestStaleProfileUpdates(immediate: Boolean = false) {
+        ProfileWorker.requestUpdateStale(
+            Global.application,
+            allowWhenVpnStopped = true,
+            immediate = immediate,
+        )
     }
 
     private suspend fun verifyApp() {
