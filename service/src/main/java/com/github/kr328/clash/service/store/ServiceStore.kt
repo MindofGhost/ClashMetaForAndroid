@@ -53,7 +53,7 @@ class ServiceStore(context: Context) {
 
     var allowBypass by store.boolean(
         key = "allow_bypass",
-        defaultValue = true
+        defaultValue = false
     )
 
     var allowIpv6 by store.boolean(
@@ -63,7 +63,7 @@ class ServiceStore(context: Context) {
 
     var vkTurnFallback by store.boolean(
         key = "vk_turn_fallback",
-        defaultValue = false
+        defaultValue = true
     )
 
     var tunStackMode by store.string(
