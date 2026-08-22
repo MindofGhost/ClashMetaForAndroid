@@ -50,6 +50,7 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
         install(SuspendModule(self))
 
         try {
+            config.awaitInitialLoad()
             tun.open()
             install(TunPauseModule(self) { paused ->
                 if (paused) {

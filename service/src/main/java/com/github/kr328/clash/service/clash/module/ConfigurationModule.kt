@@ -12,6 +12,7 @@ import com.github.kr328.clash.service.data.SelectionDao
 import com.github.kr328.clash.service.store.ServiceStore
 import com.github.kr328.clash.service.util.importedDir
 import com.github.kr328.clash.service.util.sendProfileLoaded
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
@@ -30,6 +31,11 @@ class ConfigurationModule(service: Service) : Module<ConfigurationModule.LoadExc
 
     private val store = ServiceStore(service)
     private val reload = Channel<Unit>(Channel.CONFLATED)
+    private val initialLoad = CompletableDeferred<Unit>()
+
+    suspend fun awaitInitialLoad() {
+        initialLoad.await()
+    }
 
     override suspend fun run() {
         val broadcasts = receiveBroadcast {
@@ -92,6 +98,7 @@ class ConfigurationModule(service: Service) : Module<ConfigurationModule.LoadExc
                         loaded = current
 
                         restoreSelections(active.uuid)
+                        initialLoad.complete(Unit)
 
                         StatusProvider.currentProfile = active.name
 
@@ -99,6 +106,7 @@ class ConfigurationModule(service: Service) : Module<ConfigurationModule.LoadExc
 
                         Log.d("Profile ${active.name} loaded")
                     } catch (e: Exception) {
+                        initialLoad.completeExceptionally(e)
                         logcatJob.cancel()
                         enqueueEvent(LoadException(e.message ?: "Unknown"))
                         return@scope
@@ -106,6 +114,7 @@ class ConfigurationModule(service: Service) : Module<ConfigurationModule.LoadExc
                 }
             }
         } finally {
+            initialLoad.cancel()
             persistCurrentSelections(loaded)
             logcat.cancel()
             healthCheckFinished.cancel()
