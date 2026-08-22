@@ -26,6 +26,10 @@ type remoteTun struct {
 	limit  *semaphore.Weighted
 }
 
+func newRemoteTun(callback unsafe.Pointer) *remoteTun {
+	return &remoteTun{callback: callback, limit: semaphore.NewWeighted(4)}
+}
+
 func (t *remoteTun) markSocket(fd int) {
 	_ = t.limit.Acquire(context.Background(), 1)
 	defer t.limit.Release(1)
@@ -63,15 +67,24 @@ func (t *remoteTun) close() {
 	C.release_object(t.callback)
 }
 
-//export startTun
-func startTun(fd C.int, stack, gateway, portal, dns C.c_string, callback unsafe.Pointer) C.int {
+//export prepareTun
+func prepareTun(callback unsafe.Pointer) {
 	rTunLock.Lock()
 	defer rTunLock.Unlock()
 
 	if rTun != nil {
 		rTun.close()
-		rTun = nil
 	}
+
+	remote := newRemoteTun(callback)
+	app.ApplyTunContext(remote.markSocket, remote.querySocketUid)
+	rTun = remote
+}
+
+//export startTun
+func startTun(fd C.int, stack, gateway, portal, dns C.c_string, callback unsafe.Pointer) C.int {
+	rTunLock.Lock()
+	defer rTunLock.Unlock()
 
 	f := int(fd)
 	s := C.GoString(stack)
@@ -79,13 +92,24 @@ func startTun(fd C.int, stack, gateway, portal, dns C.c_string, callback unsafe.
 	p := C.GoString(portal)
 	d := C.GoString(dns)
 
-	remote := &remoteTun{callback: callback, closed: false, limit: semaphore.NewWeighted(4)}
+	var remote *remoteTun
+	if rTun != nil && !rTun.closed && rTun.closer == nil {
+		remote = rTun
+		C.release_object(callback)
+	} else {
+		if rTun != nil {
+			rTun.close()
+		}
 
-	app.ApplyTunContext(remote.markSocket, remote.querySocketUid)
+		remote = newRemoteTun(callback)
+		app.ApplyTunContext(remote.markSocket, remote.querySocketUid)
+		rTun = remote
+	}
 
 	closer, err := tun.Start(f, s, g, p, d)
 	if err != nil {
 		remote.close()
+		rTun = nil
 
 		return 1
 	}

@@ -114,6 +114,16 @@ Java_com_github_kr328_clash_core_bridge_Bridge_nativeNotifyInstalledAppChanged(J
 }
 
 JNIEXPORT void JNICALL
+Java_com_github_kr328_clash_core_bridge_Bridge_nativePrepareTun(JNIEnv *env, jobject thiz,
+                                                                jobject cb) {
+    TRACE_METHOD();
+
+    jobject _interface = new_global(cb);
+
+    prepareTun(_interface);
+}
+
+JNIEXPORT void JNICALL
 Java_com_github_kr328_clash_core_bridge_Bridge_nativeStartTun(JNIEnv *env, jobject thiz,
                                                               jint fd,
                                                               jstring stack,

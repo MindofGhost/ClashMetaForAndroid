@@ -4,6 +4,7 @@ import android.net.ConnectivityManager
 import android.net.VpnService
 import android.os.Build
 import androidx.core.content.getSystemService
+import com.github.kr328.clash.common.log.Log
 import com.github.kr328.clash.core.Clash
 import com.github.kr328.clash.core.util.parseInetSocketAddress
 import kotlinx.coroutines.NonCancellable
@@ -25,6 +26,8 @@ class TunModule(private val vpn: VpnService) : Module<Unit>(vpn) {
     private val close = Channel<Unit>(Channel.CONFLATED)
     @Volatile
     private var attached = false
+    @Volatile
+    private var prepared = false
 
     private fun queryUid(
         protocol: Int,
@@ -58,6 +61,13 @@ class TunModule(private val vpn: VpnService) : Module<Unit>(vpn) {
     }
 
     @Synchronized
+    fun prepare() {
+        Clash.prepareTun(vpn::protect, this::queryUid)
+        prepared = true
+        Log.i("TUN socket protection prepared")
+    }
+
+    @Synchronized
     fun attach(device: TunDevice) {
         Clash.startTun(
             fd = device.fd,
@@ -69,15 +79,17 @@ class TunModule(private val vpn: VpnService) : Module<Unit>(vpn) {
             querySocketUid = this::queryUid
         )
         attached = true
+        prepared = false
     }
 
     @Synchronized
     fun detach() {
-        if (!attached)
+        if (!attached && !prepared)
             return
 
         Clash.stopTun()
         attached = false
+        prepared = false
     }
 
     fun isAttached(): Boolean = attached

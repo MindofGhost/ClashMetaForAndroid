@@ -64,6 +64,13 @@ object Clash {
         Bridge.nativeNotifyInstalledAppChanged(uidList)
     }
 
+    fun prepareTun(
+        markSocket: (Int) -> Boolean,
+        querySocketUid: (protocol: Int, source: InetSocketAddress, target: InetSocketAddress) -> Int
+    ) {
+        Bridge.nativePrepareTun(createTunInterface(markSocket, querySocketUid))
+    }
+
     fun startTun(
         fd: Int,
         stack: String,
@@ -73,19 +80,24 @@ object Clash {
         markSocket: (Int) -> Boolean,
         querySocketUid: (protocol: Int, source: InetSocketAddress, target: InetSocketAddress) -> Int
     ) {
-        Bridge.nativeStartTun(fd, stack, gateway, portal, dns, object : TunInterface {
-            override fun markSocket(fd: Int) {
-                markSocket(fd)
-            }
+        Bridge.nativeStartTun(fd, stack, gateway, portal, dns, createTunInterface(markSocket, querySocketUid))
+    }
 
-            override fun querySocketUid(protocol: Int, source: String, target: String): Int {
-                return querySocketUid(
-                    protocol,
-                    parseInetSocketAddress(source),
-                    parseInetSocketAddress(target)
-                )
-            }
-        })
+    private fun createTunInterface(
+        markSocket: (Int) -> Boolean,
+        querySocketUid: (protocol: Int, source: InetSocketAddress, target: InetSocketAddress) -> Int
+    ) = object : TunInterface {
+        override fun markSocket(fd: Int) {
+            markSocket(fd)
+        }
+
+        override fun querySocketUid(protocol: Int, source: String, target: String): Int {
+            return querySocketUid(
+                protocol,
+                parseInetSocketAddress(source),
+                parseInetSocketAddress(target)
+            )
+        }
     }
 
     fun stopTun() {
