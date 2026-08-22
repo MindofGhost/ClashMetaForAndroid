@@ -127,8 +127,12 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
 
         delay(INITIAL_DELAY)
 
+        var startupCheckPending = true
+        var startupZeroChecks = 0
+
         try {
             while (isActive) {
+                var nextCheckDelay = CHECK_INTERVAL
                 val args = readFallbackArguments()
 
                 if (args == null) {
@@ -145,8 +149,14 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
                         STOP_THRESHOLD
                     }
 
-                    if (healthCheckSucceeded)
+                    if (healthCheckSucceeded) {
                         noteEndpointAvailability(availableEndpoints, "periodic health check")
+
+                        if (availableEndpoints > 0) {
+                            startupCheckPending = false
+                            startupZeroChecks = 0
+                        }
+                    }
 
                     logInfo(
                         "VK TURN fallback check: availableEndpoints=$availableEndpoints " +
@@ -154,6 +164,21 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
                     )
 
                     when {
+                        availableEndpoints == 0 && startupCheckPending && runningArgs == null -> {
+                            startupZeroChecks++
+
+                            if (startupZeroChecks < STARTUP_ZERO_CONFIRMATIONS) {
+                                nextCheckDelay = STARTUP_RETRY_DELAY
+                                logInfo(
+                                    "VK TURN fallback startup check found no available endpoints; " +
+                                            "confirming in ${STARTUP_RETRY_DELAY / 1000}s"
+                                )
+                            } else {
+                                startupCheckPending = false
+                                startupZeroChecks = 0
+                                startProcess(args)
+                            }
+                        }
                         availableEndpoints == 0 -> startProcess(args)
                         availableEndpoints >= STOP_THRESHOLD -> stopProcess(
                             "$availableEndpoints endpoints are available"
@@ -161,7 +186,7 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
                     }
                 }
 
-                delay(CHECK_INTERVAL)
+                delay(nextCheckDelay)
             }
         } finally {
             stopProcess("service stopped")
@@ -720,6 +745,8 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         private const val CAPTCHA_PORT = 8765
         private const val CAPTCHA_PATH = "/not_robot_captcha"
         private const val INITIAL_DELAY = 5_000L
+        private const val STARTUP_RETRY_DELAY = 10_000L
+        private const val STARTUP_ZERO_CONFIRMATIONS = 2
         private const val CHECK_INTERVAL = 30_000L
         private const val RUNNING_WATCHDOG_INTERVAL = 15_000L
         private const val HEALTH_WATCHDOG_DELAY = 20_000L
