@@ -17,7 +17,7 @@ import com.github.kr328.clash.common.compat.pendingIntentFlags
 import com.github.kr328.clash.common.constants.Intents
 import com.github.kr328.clash.common.log.Log
 import com.github.kr328.clash.common.util.componentName
-import com.github.kr328.clash.service.ProfileWorker
+import com.github.kr328.clash.service.AppUpdateActivity
 import com.github.kr328.clash.service.R
 import com.github.kr328.clash.service.store.ServiceStore
 import kotlinx.coroutines.sync.Mutex
@@ -264,25 +264,16 @@ private fun Context.showAppUpdateNotification(url: String, expectedCert: String)
     )
 
     val intent = Intent(Intents.ACTION_APP_UPDATE_INSTALL)
-        .setComponent(ProfileWorker::class.componentName)
+        .setComponent(AppUpdateActivity::class.componentName)
         .putExtra(Intents.EXTRA_URL, url)
         .putExtra(Intents.EXTRA_CERT_SHA256, expectedCert)
 
-    val pendingIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        PendingIntent.getForegroundService(
-            this,
-            R.id.nf_app_update,
-            intent,
-            pendingIntentFlags(PendingIntent.FLAG_UPDATE_CURRENT)
-        )
-    } else {
-        PendingIntent.getService(
-            this,
-            R.id.nf_app_update,
-            intent,
-            pendingIntentFlags(PendingIntent.FLAG_UPDATE_CURRENT)
-        )
-    }
+    val pendingIntent = PendingIntent.getActivity(
+        this,
+        R.id.nf_app_update,
+        intent,
+        pendingIntentFlags(PendingIntent.FLAG_UPDATE_CURRENT)
+    )
 
     val notification = NotificationCompat.Builder(this, APP_UPDATE_CHANNEL)
         .setContentTitle(getString(R.string.app_update_available))
@@ -290,7 +281,7 @@ private fun Context.showAppUpdateNotification(url: String, expectedCert: String)
         .setColor(getColorCompat(R.color.color_clash))
         .setSmallIcon(R.drawable.ic_logo_service)
         .setContentIntent(pendingIntent)
-        .setAutoCancel(true)
+        .setAutoCancel(false)
         .setOnlyAlertOnce(true)
         .build()
 
@@ -336,23 +327,14 @@ private fun Context.showAppUpdateReadyNotification() {
     )
 
     val intent = Intent(Intents.ACTION_APP_UPDATE_OPEN_DOWNLOADED)
-        .setComponent(ProfileWorker::class.componentName)
+        .setComponent(AppUpdateActivity::class.componentName)
 
-    val pendingIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        PendingIntent.getForegroundService(
-            this,
-            R.id.nf_app_update_ready,
-            intent,
-            pendingIntentFlags(PendingIntent.FLAG_UPDATE_CURRENT)
-        )
-    } else {
-        PendingIntent.getService(
-            this,
-            R.id.nf_app_update_ready,
-            intent,
-            pendingIntentFlags(PendingIntent.FLAG_UPDATE_CURRENT)
-        )
-    }
+    val pendingIntent = PendingIntent.getActivity(
+        this,
+        R.id.nf_app_update_ready,
+        intent,
+        pendingIntentFlags(PendingIntent.FLAG_UPDATE_CURRENT)
+    )
 
     val notification = NotificationCompat.Builder(this, APP_UPDATE_CHANNEL)
         .setContentTitle(getString(R.string.app_update_downloaded))
