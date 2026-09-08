@@ -137,6 +137,10 @@ object Clash {
         Bridge.nativeStopVkTurn()
     }
 
+    fun wakeVkTurn() {
+        Bridge.nativeWakeVkTurn()
+    }
+
     fun isVkTurnRunning(): Boolean {
         return Bridge.nativeIsVkTurnRunning()
     }

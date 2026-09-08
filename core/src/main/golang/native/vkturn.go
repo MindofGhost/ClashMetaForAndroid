@@ -12,21 +12,55 @@ import (
 	"time"
 	"unsafe"
 
+	"cfa/native/app"
 	"cfa/native/vkturn"
 
 	"github.com/metacubex/mihomo/log"
+	freeturn "github.com/samosvalishe/free-turn-proxy/mobile"
 )
-
-var vkTurnRuntime = struct {
-	sync.Mutex
-	cancel context.CancelFunc
-	done   chan struct{}
-}{}
 
 var vkTurnEvents = struct {
 	sync.Mutex
 	callbacks []unsafe.Pointer
 }{}
+
+type freeTurnEventSink struct{}
+
+type freeTurnProtector struct{}
+
+func (freeTurnEventSink) OnState(state string, streams, total int, errMsg string) {
+	if errMsg != "" {
+		line := fmt.Sprintf("[State] %s streams=%d/%d error=%s", state, streams, total, errMsg)
+		notifyVkTurnEvent(line)
+		log.Infoln("[VK_TURN] %s", line)
+		return
+	}
+	line := fmt.Sprintf("[State] %s streams=%d/%d", state, streams, total)
+	notifyVkTurnEvent(line)
+	log.Infoln("[VK_TURN] %s", line)
+}
+
+func (freeTurnEventSink) OnLog(level, msg string, unixMillis int64) {
+	if msg != "" {
+		notifyVkTurnEvent(msg)
+		log.Infoln("[VK_TURN] [%s] %s", strings.ToUpper(level), msg)
+	}
+}
+
+func (freeTurnEventSink) OnCaptcha(url string) {
+	if strings.TrimSpace(url) == "" {
+		notifyVkTurnEvent("[Captcha] Manual captcha closed")
+		return
+	}
+	notifyVkTurnEvent("[Captcha] Triggering manual captcha fallback...")
+	notifyVkTurnEvent("ACTION REQUIRED: MANUAL CAPTCHA SOLVING NEEDED")
+	notifyVkTurnEvent("CAPTCHA_URL: " + url)
+}
+
+func (freeTurnProtector) Protect(fd int) bool {
+	app.MarkSocket(fd)
+	return true
+}
 
 type vkTurnLogWriter struct{}
 
@@ -76,6 +110,8 @@ func notifyVkTurnEvent(line string) {
 func init() {
 	stdlog.SetFlags(0)
 	stdlog.SetOutput(vkTurnLogWriter{})
+	freeturn.SetEventSink(freeTurnEventSink{})
+	freeturn.SetProtect(freeTurnProtector{})
 }
 
 func parseCommandLine(commandLine string) ([]string, error) {
@@ -138,38 +174,20 @@ func startVkTurn(args C.c_string) {
 		return
 	}
 
-	vkTurnRuntime.Lock()
-	if vkTurnRuntime.cancel != nil {
-		vkTurnRuntime.cancel()
-		done := vkTurnRuntime.done
-		vkTurnRuntime.Unlock()
-		<-done
-		vkTurnRuntime.Lock()
+	configJSON, err := freeTurnConfigJSONFromLegacyArgs(parsedArgs, app.Hwid())
+	if err != nil {
+		log.Warnln("[VK_TURN] invalid free-turn configuration: %s", err.Error())
+		return
+	}
+	if cacheDir := strings.TrimSpace(app.CacheDir()); cacheDir != "" {
+		freeturn.SetStateDir(cacheDir)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	vkTurnRuntime.cancel = cancel
-	vkTurnRuntime.done = done
-	vkTurnRuntime.Unlock()
+	log.Infoln("[VK_TURN] starting free-turn-proxy: %s", strings.Join(parsedArgs, " "))
 
-	go func() {
-		defer close(done)
-		log.Infoln("[VK_TURN] starting: %s", strings.Join(parsedArgs, " "))
-
-		if err := vkturn.Run(ctx, parsedArgs); err != nil && ctx.Err() == nil {
-			log.Warnln("[VK_TURN] stopped with error: %s", err.Error())
-		} else {
-			log.Infoln("[VK_TURN] stopped")
-		}
-
-		vkTurnRuntime.Lock()
-		if vkTurnRuntime.done == done {
-			vkTurnRuntime.cancel = nil
-			vkTurnRuntime.done = nil
-		}
-		vkTurnRuntime.Unlock()
-	}()
+	if err := freeturn.Restart(configJSON, 0); err != nil {
+		log.Warnln("[VK_TURN] free-turn-proxy start failed: %s", err.Error())
+	}
 }
 
 //export resolveVkTurnHost
@@ -188,25 +206,18 @@ func resolveVkTurnHost(host C.c_string) *C.char {
 
 //export stopVkTurn
 func stopVkTurn() {
-	vkTurnRuntime.Lock()
-	cancel := vkTurnRuntime.cancel
-	done := vkTurnRuntime.done
-	if cancel == nil {
-		vkTurnRuntime.Unlock()
-		return
-	}
-	cancel()
-	vkTurnRuntime.Unlock()
+	freeturn.Stop()
+}
 
-	<-done
+//export wakeVkTurn
+func wakeVkTurn() {
+	freeturn.Wake()
 }
 
 //export isVkTurnRunning
 func isVkTurnRunning() C.int {
-	vkTurnRuntime.Lock()
-	defer vkTurnRuntime.Unlock()
-
-	if vkTurnRuntime.cancel == nil {
+	state := freeturn.GetState()
+	if state == nil || state.State == freeturn.StateIdle || state.State == freeturn.StateError {
 		return 0
 	}
 

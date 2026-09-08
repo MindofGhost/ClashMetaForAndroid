@@ -212,6 +212,13 @@ Java_com_github_kr328_clash_core_bridge_Bridge_nativeStopVkTurn(JNIEnv *env, job
     stopVkTurn();
 }
 
+JNIEXPORT void JNICALL
+Java_com_github_kr328_clash_core_bridge_Bridge_nativeWakeVkTurn(JNIEnv *env, jobject thiz) {
+    TRACE_METHOD();
+
+    wakeVkTurn();
+}
+
 JNIEXPORT jboolean JNICALL
 Java_com_github_kr328_clash_core_bridge_Bridge_nativeIsVkTurnRunning(JNIEnv *env, jobject thiz) {
     TRACE_METHOD();

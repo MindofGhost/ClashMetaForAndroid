@@ -6,3 +6,7 @@
 	path = core/src/main/golang/native/vkturn
 	url = https://github.com/MindofGhost/vk-turn-proxy.git
 	branch = cmfa-native-port
+[submodule "core/src/foss/golang/free-turn-proxy"]
+	path = core/src/foss/golang/free-turn-proxy
+	url = https://github.com/MindofGhost/free-turn-proxy.git
+	branch = cmfa-freeturn-fix

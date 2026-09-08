@@ -83,6 +83,7 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
 
         launch {
             for (ignored in screenToggle) {
+                wakeIfRunning("screen on")
                 restartIfExpectedButStopped("screen on")
                 scheduleHealthWatchdog("screen on")
             }
@@ -223,6 +224,19 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         watchdog = null
         cancelCaptchaNotification()
         startProcess(args)
+    }
+
+    private fun wakeIfRunning(reason: String) {
+        if (runningArgs == null)
+            return
+
+        runCatching {
+            Clash.wakeVkTurn()
+        }.onSuccess {
+            logInfo("VK TURN fallback wake requested after $reason")
+        }.onFailure {
+            logWarning("VK TURN fallback wake after $reason failed: ${it.message}", it)
+        }
     }
 
     private fun scheduleHealthWatchdog(reason: String) {
@@ -582,6 +596,17 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
     }
 
     private fun handleProcessLine(line: String) {
+        if (line.startsWith("[State]")) {
+            logInfo("VK TURN fallback event received: $line")
+
+            if (line.contains("[State] captcha", ignoreCase = true)) {
+                openedCaptchaUrl = null
+                waitingForCaptcha = true
+                resumeWatchdog?.cancel()
+                resumeWatchdog = null
+            }
+        }
+
         if (line.contains("CAPTCHA_URL") ||
             line.contains("ACTION REQUIRED") ||
             line.contains("Triggering manual captcha fallback", ignoreCase = true)) {
@@ -749,7 +774,7 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         private const val STARTUP_ZERO_CONFIRMATIONS = 2
         private const val CHECK_INTERVAL = 30_000L
         private const val RUNNING_WATCHDOG_INTERVAL = 15_000L
-        private const val HEALTH_WATCHDOG_DELAY = 20_000L
+        private const val HEALTH_WATCHDOG_DELAY = 90_000L
         private const val HEALTH_CHECK_TIMEOUT = 30_000L
         private const val VK_REACHABILITY_TIMEOUT = 5_000
         private const val UNAVAILABLE_DELAY = 0xffff

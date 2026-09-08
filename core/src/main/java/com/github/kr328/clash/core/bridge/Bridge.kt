@@ -29,6 +29,7 @@ object Bridge {
     external fun nativeResolveVkTurnHost(host: String): String?
     external fun nativeSubscribeVkTurnEvents(callback: LogcatInterface)
     external fun nativeStopVkTurn()
+    external fun nativeWakeVkTurn()
     external fun nativeIsVkTurnRunning(): Boolean
     external fun nativeQueryGroupNames(excludeNotSelectable: Boolean): String
     external fun nativeQueryGroup(name: String, sort: String): String?
