@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	stdlog "log"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -180,7 +181,7 @@ func startVkTurn(args C.c_string) {
 		return
 	}
 	if cacheDir := strings.TrimSpace(app.CacheDir()); cacheDir != "" {
-		freeturn.SetStateDir(cacheDir)
+		freeturn.SetStateDir(filepath.Join(cacheDir, "freeturn"))
 	}
 
 	log.Infoln("[VK_TURN] starting free-turn-proxy: %s", strings.Join(parsedArgs, " "))
