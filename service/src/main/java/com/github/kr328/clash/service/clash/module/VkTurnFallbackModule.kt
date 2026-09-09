@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
+import android.os.SystemClock
 import androidx.core.content.getSystemService
 import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationCompat
@@ -49,6 +50,8 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
     private var openedCaptchaUrl: String? = null
     private var waitingForCaptcha = false
     private var lastAvailableEndpointCount: Int? = null
+    private var lastPhysicalNetworkSignature: String? = null
+    private var physicalNetworkSettleUntil = 0L
     private var moduleScope: CoroutineScope? = null
     private val fallbackCheckMutex = Mutex()
     private val notificationManager = NotificationManagerCompat.from(service)
@@ -295,15 +298,12 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         if (groups.isEmpty())
             return STOP_THRESHOLD
 
-        groups.forEach {
-            runCatching {
-                withTimeoutOrNull(HEALTH_CHECK_TIMEOUT) {
-                    Clash.healthCheck(it).await()
-                }
-            }.onFailure { e ->
-                logInfo("VK TURN fallback health check failed for $it", e)
-            }
-        }
+        val completed = withTimeoutOrNull(HEALTH_CHECK_TIMEOUT) {
+            Clash.healthCheckAll().await()
+            true
+        } == true
+
+        check(completed) { "health check timeout for all groups" }
 
         return groups.flatMap { group ->
             runCatching {
@@ -319,6 +319,9 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
     }
 
     private suspend fun checkFallback(args: List<String>, reason: String) {
+        if (!awaitPhysicalNetworkSettle(reason))
+            return
+
         val availableEndpoints = runHealthCheck("$reason health check") ?: run {
             confirmFallbackStart(args, "$reason health check failed")
             return
@@ -354,6 +357,9 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
     }
 
     private suspend fun confirmFallbackStart(args: List<String>, reason: String) {
+        if (!awaitPhysicalNetworkSettle(reason))
+            return
+
         val vkLink = findArgument(args, "-vk-link")
         if (vkLink != null && !isVkLinkReachable(vkLink)) {
             logWarning(
@@ -374,6 +380,44 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
 
         logInfo("VK TURN fallback start confirmed after $reason")
         startProcess(args)
+    }
+
+    private suspend fun awaitPhysicalNetworkSettle(reason: String): Boolean {
+        while (true) {
+            val signature = physicalNetworkSignature()
+            if (signature == null) {
+                logInfo("VK TURN fallback check postponed after $reason: no physical network")
+                return false
+            }
+
+            val now = SystemClock.elapsedRealtime()
+            if (signature != lastPhysicalNetworkSignature) {
+                lastPhysicalNetworkSignature = signature
+                physicalNetworkSettleUntil = now + NETWORK_SETTLE_DELAY
+                logInfo("VK TURN fallback physical network changed after $reason; delaying checks")
+            }
+
+            val remaining = physicalNetworkSettleUntil - now
+            if (remaining <= 0)
+                return true
+
+            delay(remaining)
+        }
+    }
+
+    private fun physicalNetworkSignature(): String? {
+        val networks = connectivity?.allNetworks.orEmpty().mapNotNull { network ->
+            val capabilities = connectivity?.getNetworkCapabilities(network) ?: return@mapNotNull null
+            if (!capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) ||
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+            ) {
+                return@mapNotNull null
+            }
+
+            network.toString()
+        }.sorted()
+
+        return networks.takeIf { it.isNotEmpty() }?.joinToString(separator = ",")
     }
 
     private fun isAvailableEndpoint(proxy: Proxy): Boolean {
@@ -760,6 +804,7 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         private const val RUNNING_WATCHDOG_INTERVAL = 15_000L
         private const val HEALTH_WATCHDOG_DELAY = 90_000L
         private const val HEALTH_CHECK_TIMEOUT = 30_000L
+        private const val NETWORK_SETTLE_DELAY = 20_000L
         private const val VK_REACHABILITY_TIMEOUT = 5_000
         private const val UNAVAILABLE_DELAY = 0xffff
         private const val STOP_THRESHOLD = 2

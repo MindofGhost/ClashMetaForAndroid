@@ -170,8 +170,10 @@ object Clash {
         }
     }
 
-    fun healthCheckAll() {
-        Bridge.nativeHealthCheckAll()
+    fun healthCheckAll(): CompletableDeferred<Unit> {
+        return CompletableDeferred<Unit>().apply {
+            Bridge.nativeHealthCheckAll(this)
+        }
     }
 
     fun closeAllConnections() {

@@ -43,9 +43,17 @@ func HealthCheck(name string) {
 }
 
 func HealthCheckAll() {
+	wg := &sync.WaitGroup{}
+
 	for _, g := range QueryProxyGroupNames(false) {
+		wg.Add(1)
+
 		go func(group string) {
+			defer wg.Done()
+
 			HealthCheck(group)
 		}(g)
 	}
+
+	wg.Wait()
 }
