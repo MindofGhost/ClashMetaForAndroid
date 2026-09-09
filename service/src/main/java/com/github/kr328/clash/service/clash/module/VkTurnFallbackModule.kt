@@ -31,6 +31,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.net.InetSocketAddress
 import java.net.Socket
 import javax.net.ssl.SSLSocket
@@ -48,6 +50,7 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
     private var waitingForCaptcha = false
     private var lastAvailableEndpointCount: Int? = null
     private var moduleScope: CoroutineScope? = null
+    private val fallbackCheckMutex = Mutex()
     private val notificationManager = NotificationManagerCompat.from(service)
 
     override suspend fun run() = coroutineScope {
@@ -128,66 +131,18 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
 
         delay(INITIAL_DELAY)
 
-        var startupCheckPending = true
-        var startupZeroChecks = 0
-
         try {
             while (isActive) {
-                var nextCheckDelay = CHECK_INTERVAL
                 val args = readFallbackArguments()
 
                 if (args == null) {
                     logInfo("VK TURN fallback arguments are absent")
                     stopProcess("fallback configuration is absent")
                 } else {
-                    var healthCheckSucceeded = true
-                    val availableEndpoints = runCatching {
-                        availableEndpointCount()
-                    }.getOrElse {
-                        logWarning("VK TURN fallback health check failed", it)
-                        healthCheckSucceeded = false
-
-                        STOP_THRESHOLD
-                    }
-
-                    if (healthCheckSucceeded) {
-                        noteEndpointAvailability(availableEndpoints, "periodic health check")
-
-                        if (availableEndpoints > 0) {
-                            startupCheckPending = false
-                            startupZeroChecks = 0
-                        }
-                    }
-
-                    logInfo(
-                        "VK TURN fallback check: availableEndpoints=$availableEndpoints " +
-                                "args=${args.joinToString(" ")}"
-                    )
-
-                    when {
-                        availableEndpoints == 0 && startupCheckPending && runningArgs == null -> {
-                            startupZeroChecks++
-
-                            if (startupZeroChecks < STARTUP_ZERO_CONFIRMATIONS) {
-                                nextCheckDelay = STARTUP_RETRY_DELAY
-                                logInfo(
-                                    "VK TURN fallback startup check found no available endpoints; " +
-                                            "confirming in ${STARTUP_RETRY_DELAY / 1000}s"
-                                )
-                            } else {
-                                startupCheckPending = false
-                                startupZeroChecks = 0
-                                startProcess(args)
-                            }
-                        }
-                        availableEndpoints == 0 -> startProcess(args)
-                        availableEndpoints >= STOP_THRESHOLD -> stopProcess(
-                            "$availableEndpoints endpoints are available"
-                        )
-                    }
+                    checkFallbackLocked(args, "periodic check")
                 }
 
-                delay(nextCheckDelay)
+                delay(CHECK_INTERVAL)
             }
         } finally {
             stopProcess("service stopped")
@@ -265,21 +220,14 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
 
             if (!coreRunning) {
                 logWarning("VK TURN fallback health watchdog after $reason: core is stopped; restarting")
-                restartProcess(args, "health watchdog after $reason: core stopped")
+                confirmFallbackStartLocked(args, "health watchdog after $reason: core stopped")
                 return@launch
             }
 
-            val availableEndpoints = runCatching {
-                availableEndpointCount()
-            }.getOrElse {
-                logWarning("VK TURN fallback health watchdog after $reason health check failed", it)
+            val availableEndpoints = runHealthCheck("health watchdog after $reason")
 
-                0
-            }
-
-            if (availableEndpoints > 0) {
+            if (availableEndpoints != null && availableEndpoints > 0) {
                 logInfo("VK TURN fallback health watchdog after $reason: availableEndpoints=$availableEndpoints")
-                noteEndpointAvailability(availableEndpoints, "health watchdog after $reason")
                 return@launch
             }
 
@@ -288,7 +236,7 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
                         "after ${HEALTH_WATCHDOG_DELAY / 1000}s; restarting"
             )
 
-            restartProcess(args, "health watchdog after $reason failed")
+            confirmFallbackStartLocked(args, "health watchdog after $reason failed")
         }
     }
 
@@ -364,6 +312,70 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         }.map { it.name }.distinct().size
     }
 
+    private suspend fun checkFallbackLocked(args: List<String>, reason: String) {
+        fallbackCheckMutex.withLock {
+            checkFallback(args, reason)
+        }
+    }
+
+    private suspend fun checkFallback(args: List<String>, reason: String) {
+        val availableEndpoints = runHealthCheck("$reason health check") ?: run {
+            confirmFallbackStart(args, "$reason health check failed")
+            return
+        }
+
+        logInfo(
+            "VK TURN fallback check: availableEndpoints=$availableEndpoints " +
+                    "args=${args.joinToString(" ")}"
+        )
+
+        when {
+            availableEndpoints == 0 -> confirmFallbackStart(args, "$reason found no available endpoints")
+            availableEndpoints >= STOP_THRESHOLD -> stopProcess(
+                "$availableEndpoints endpoints are available"
+            )
+        }
+    }
+
+    private suspend fun runHealthCheck(reason: String): Int? {
+        return runCatching {
+            availableEndpointCount()
+        }.onSuccess {
+            noteEndpointAvailability(it, reason)
+        }.onFailure {
+            logWarning("VK TURN fallback $reason failed", it)
+        }.getOrNull()
+    }
+
+    private suspend fun confirmFallbackStartLocked(args: List<String>, reason: String) {
+        fallbackCheckMutex.withLock {
+            confirmFallbackStart(args, reason)
+        }
+    }
+
+    private suspend fun confirmFallbackStart(args: List<String>, reason: String) {
+        val vkLink = findArgument(args, "-vk-link")
+        if (vkLink != null && !isVkLinkReachable(vkLink)) {
+            logWarning(
+                "VK TURN fallback start postponed after $reason: " +
+                        "${Uri.parse(vkLink).host ?: vkLink} is unavailable"
+            )
+            return
+        }
+
+        val confirmedEndpoints = runHealthCheck("confirmation health check after $reason")
+        if (confirmedEndpoints != 0) {
+            logInfo(
+                "VK TURN fallback start skipped after $reason: " +
+                        "confirmation availableEndpoints=${confirmedEndpoints ?: "failed"}"
+            )
+            return
+        }
+
+        logInfo("VK TURN fallback start confirmed after $reason")
+        startProcess(args)
+    }
+
     private fun isAvailableEndpoint(proxy: Proxy): Boolean {
         if (proxy.isGroup)
             return false
@@ -394,14 +406,6 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         if (runningArgs != null)
             stopProcess("fallback arguments changed")
 
-        val vkLink = findArgument(args, "-vk-link")
-        if (vkLink != null && !isVkLinkReachable(vkLink)) {
-            logWarning(
-                "VK TURN fallback start postponed: ${Uri.parse(vkLink).host ?: vkLink} is unavailable"
-            )
-            return
-        }
-
         runCatching {
             logInfo("VK TURN fallback starting in core: ${args.joinToString(" ")}")
 
@@ -413,24 +417,6 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         }.onFailure {
             logWarning("VK TURN fallback start failed: ${it.message}", it)
         }
-    }
-
-    private suspend fun restartProcess(args: List<String>, reason: String) {
-        logInfo("VK TURN fallback restarting: $reason")
-
-        runningArgs = null
-        openedCaptchaUrl = null
-        waitingForCaptcha = false
-        lastAvailableEndpointCount = 0
-        cancelCaptchaNotification()
-
-        runCatching {
-            Clash.stopVkTurn()
-        }.onFailure {
-            logWarning("VK TURN fallback stop before restart failed: ${it.message}", it)
-        }
-
-        startProcess(args)
     }
 
     private fun findArgument(args: List<String>, name: String): String? {
@@ -770,8 +756,6 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         private const val CAPTCHA_PORT = 8765
         private const val CAPTCHA_PATH = "/not_robot_captcha"
         private const val INITIAL_DELAY = 5_000L
-        private const val STARTUP_RETRY_DELAY = 10_000L
-        private const val STARTUP_ZERO_CONFIRMATIONS = 2
         private const val CHECK_INTERVAL = 30_000L
         private const val RUNNING_WATCHDOG_INTERVAL = 15_000L
         private const val HEALTH_WATCHDOG_DELAY = 90_000L
