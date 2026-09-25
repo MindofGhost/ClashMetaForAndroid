@@ -30,15 +30,15 @@ func newRemoteTun(callback unsafe.Pointer) *remoteTun {
 	return &remoteTun{callback: callback, limit: semaphore.NewWeighted(4)}
 }
 
-func (t *remoteTun) markSocket(fd int) {
+func (t *remoteTun) markSocket(fd int) bool {
 	_ = t.limit.Acquire(context.Background(), 1)
 	defer t.limit.Release(1)
 
 	if t.closed {
-		return
+		return false
 	}
 
-	C.mark_socket(t.callback, C.int(fd))
+	return C.mark_socket(t.callback, C.int(fd)) != 0
 }
 
 func (t *remoteTun) querySocketUid(protocol int, source, target string) int {

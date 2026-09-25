@@ -87,8 +87,8 @@ object Clash {
         markSocket: (Int) -> Boolean,
         querySocketUid: (protocol: Int, source: InetSocketAddress, target: InetSocketAddress) -> Int
     ) = object : TunInterface {
-        override fun markSocket(fd: Int) {
-            markSocket(fd)
+        override fun markSocket(fd: Int): Boolean {
+            return markSocket(fd)
         }
 
         override fun querySocketUid(protocol: Int, source: String, target: String): Int {

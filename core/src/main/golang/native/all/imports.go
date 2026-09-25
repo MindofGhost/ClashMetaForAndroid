@@ -14,4 +14,5 @@ import (
 	_ "golang.org/x/sync/semaphore"
 
 	_ "github.com/metacubex/mihomo/log"
+	_ "github.com/samosvalishe/free-turn-proxy/mobile"
 )
