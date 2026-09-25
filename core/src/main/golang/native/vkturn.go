@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	stdlog "log"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -14,6 +15,7 @@ import (
 	"unsafe"
 
 	"cfa/native/app"
+	"cfa/native/config"
 	"cfa/native/vkturn"
 
 	"github.com/metacubex/mihomo/log"
@@ -164,6 +166,24 @@ func subscribeVkTurnEvents(callback unsafe.Pointer) {
 	vkTurnEvents.Lock()
 	vkTurnEvents.callbacks = append(vkTurnEvents.callbacks, callback)
 	vkTurnEvents.Unlock()
+}
+
+//export readVkTurnConfig
+func readVkTurnConfig(path C.c_string) *C.char {
+	data, err := os.ReadFile(C.GoString(path))
+	if err != nil {
+		log.Warnln("[VK_TURN] failed to read profile: %s", err.Error())
+		return nil
+	}
+	commandLine, err := config.ParseTurnBypassConfig(data)
+	if err != nil {
+		log.Warnln("[VK_TURN] invalid bypass configuration: %s", err.Error())
+		return nil
+	}
+	if commandLine == "" {
+		return nil
+	}
+	return C.CString(commandLine)
 }
 
 //export startVkTurn

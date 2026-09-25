@@ -261,30 +261,13 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
             return@withContext null
         }
 
-        val firstLine = config.bufferedReader().use { it.readLine() }
-        if (firstLine == null) {
-            logInfo("VK TURN fallback config is empty: ${config.absolutePath}")
-
-            return@withContext null
-        }
-
-        val comment = firstLine.trim().takeIf { it.startsWith("#") }
-            ?.drop(1)
-            ?.trim()
-        if (comment == null) {
-            logInfo("VK TURN fallback first config line is not a comment")
-
-            return@withContext null
-        }
-
-        if (!comment.startsWith("-")) {
-            logInfo("VK TURN fallback first comment does not look like arguments")
-
-            return@withContext null
-        }
-
         runCatching {
-            parseCommandLine(comment)
+            val commandLine = Clash.readVkTurnConfig(config.absolutePath)
+            if (commandLine == null) {
+                logInfo("VK TURN fallback has no usable turn configuration")
+                return@withContext null
+            }
+            parseCommandLine(commandLine)
         }.getOrElse {
             logWarning("VK TURN fallback arguments are invalid", it)
 

@@ -182,6 +182,20 @@ Java_com_github_kr328_clash_core_bridge_Bridge_nativeStartVkTurn(JNIEnv *env, jo
 }
 
 JNIEXPORT jstring JNICALL
+Java_com_github_kr328_clash_core_bridge_Bridge_nativeReadVkTurnConfig(JNIEnv *env, jobject thiz,
+                                                                   jstring path) {
+    TRACE_METHOD();
+
+    scoped_string _path = get_string(path);
+    scoped_string command_line = readVkTurnConfig(_path);
+
+    if (command_line == NULL)
+        return NULL;
+
+    return new_string(command_line);
+}
+
+JNIEXPORT jstring JNICALL
 Java_com_github_kr328_clash_core_bridge_Bridge_nativeResolveVkTurnHost(JNIEnv *env, jobject thiz,
                                                                        jstring host) {
     TRACE_METHOD();

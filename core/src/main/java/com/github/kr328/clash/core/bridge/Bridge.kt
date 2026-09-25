@@ -26,6 +26,7 @@ object Bridge {
     external fun nativeStartHttp(listenAt: String): String?
     external fun nativeStopHttp()
     external fun nativeStartVkTurn(args: String)
+    external fun nativeReadVkTurnConfig(path: String): String?
     external fun nativeResolveVkTurnHost(host: String): String?
     external fun nativeSubscribeVkTurnEvents(callback: LogcatInterface)
     external fun nativeStopVkTurn()

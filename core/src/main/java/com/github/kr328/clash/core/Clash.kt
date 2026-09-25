@@ -116,6 +116,10 @@ object Clash {
         Bridge.nativeStartVkTurn(quoteCommandLine(args))
     }
 
+    fun readVkTurnConfig(path: String): String? {
+        return Bridge.nativeReadVkTurnConfig(path)
+    }
+
     fun resolveVkTurnHost(host: String): List<String> {
         return Bridge.nativeResolveVkTurnHost(host)
             ?.split(',')
