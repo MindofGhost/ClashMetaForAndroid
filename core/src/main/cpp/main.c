@@ -499,14 +499,18 @@ static jclass c_clash_exception;
 static jclass c_content;
 static jobject o_unit;
 
-static void call_tun_interface_mark_socket_impl(void *tun_interface, int fd) {
+static int call_tun_interface_mark_socket_impl(void *tun_interface, int fd) {
     TRACE_METHOD();
 
     ATTACH_JNI();
 
-    (*env)->CallVoidMethod(env, (jobject) tun_interface,
-                           (jmethodID) m_tun_interface_mark_socket,
-                           (jint) fd);
+    jboolean protected = (*env)->CallBooleanMethod(env, (jobject) tun_interface,
+                                                   m_tun_interface_mark_socket, (jint) fd);
+    if ((*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+        return 0;
+    }
+    return protected == JNI_TRUE;
 }
 
 static int call_tun_interface_query_socket_uid_impl(void *tun_interface, int protocol,
@@ -654,7 +658,7 @@ JNI_OnLoad(JavaVM *vm, void *reserved) {
     jclass c_unit = find_class("kotlin/Unit");
 
     m_tun_interface_mark_socket = find_method(c_tun_interface, "markSocket",
-                                              "(I)V");
+                                              "(I)Z");
     m_tun_interface_query_socket_uid = find_method(c_tun_interface, "querySocketUid",
                                                    "(ILjava/lang/String;Ljava/lang/String;)I");
     m_completable_complete = find_method(c_completable, "complete",

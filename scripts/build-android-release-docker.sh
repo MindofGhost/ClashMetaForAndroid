@@ -236,6 +236,7 @@ fi
 
 go version
 (cd /workspace/core/src/main/golang && go mod tidy -diff)
+(cd /workspace/core/src/foss/golang && go mod tidy -diff)
 
 ./gradlew --no-daemon "$TASK"
 

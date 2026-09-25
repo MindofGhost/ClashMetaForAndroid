@@ -19,6 +19,7 @@ type freeTurnLegacyConfig struct {
 	NumStreams     int
 	UseUDP         bool
 	NoDTLS         bool
+	NoClientIDAck  bool
 	VLESSMode      bool
 	VLESSBond      bool
 	WrapMode       bool
@@ -34,16 +35,17 @@ type freeTurnLegacyConfig struct {
 }
 
 type freeTurnClientJSON struct {
-	Peer     string             `json:"peer"`
-	ClientID string             `json:"clientId"`
-	Provider string             `json:"provider"`
-	TURN     freeTurnTURNJSON   `json:"turn"`
-	Proxy    freeTurnProxyJSON  `json:"proxy"`
-	VK       freeTurnVKJSON     `json:"vk"`
-	Obf      freeTurnObfJSON    `json:"obf"`
-	DNS      freeTurnDNSJSON    `json:"dns"`
-	Log      freeTurnLogJSON    `json:"log"`
-	Tunnel   freeTurnTunnelJSON `json:"tunnel"`
+	Peer          string             `json:"peer"`
+	ClientID      string             `json:"clientId"`
+	NoClientIDAck bool               `json:"noClientIdAck,omitempty"`
+	Provider      string             `json:"provider"`
+	TURN          freeTurnTURNJSON   `json:"turn"`
+	Proxy         freeTurnProxyJSON  `json:"proxy"`
+	VK            freeTurnVKJSON     `json:"vk"`
+	Obf           freeTurnObfJSON    `json:"obf"`
+	DNS           freeTurnDNSJSON    `json:"dns"`
+	Log           freeTurnLogJSON    `json:"log"`
+	Tunnel        freeTurnTunnelJSON `json:"tunnel"`
 }
 
 type freeTurnTURNJSON struct {
@@ -141,9 +143,10 @@ func freeTurnConfigJSONFromLegacyArgs(args []string, hwid string) (string, error
 	}
 
 	out := freeTurnClientJSON{
-		Peer:     cfg.PeerAddr,
-		ClientID: clientID,
-		Provider: "vk",
+		Peer:          cfg.PeerAddr,
+		ClientID:      clientID,
+		NoClientIDAck: cfg.NoClientIDAck,
+		Provider:      "vk",
 		TURN: freeTurnTURNJSON{
 			N:         cfg.NumStreams,
 			Transport: transport,
@@ -203,6 +206,7 @@ func parseFreeTurnLegacyConfig(args []string) (freeTurnLegacyConfig, error) {
 	flags.IntVar(&cfg.NumStreams, "n", cfg.NumStreams, "")
 	flags.BoolVar(&cfg.UseUDP, "udp", cfg.UseUDP, "")
 	flags.BoolVar(&cfg.NoDTLS, "no-dtls", cfg.NoDTLS, "")
+	flags.BoolVar(&cfg.NoClientIDAck, "no-client-id-ack", cfg.NoClientIDAck, "")
 	flags.BoolVar(&cfg.VLESSMode, "vless", cfg.VLESSMode, "")
 	flags.BoolVar(&cfg.VLESSBond, "vless-bond", cfg.VLESSBond, "")
 	flags.BoolVar(&cfg.WrapMode, "wrap", cfg.WrapMode, "")

@@ -61,8 +61,7 @@ func (freeTurnEventSink) OnCaptcha(url string) {
 }
 
 func (freeTurnProtector) Protect(fd int) bool {
-	app.MarkSocket(fd)
-	return true
+	return app.MarkSocket(fd)
 }
 
 type vkTurnLogWriter struct{}
