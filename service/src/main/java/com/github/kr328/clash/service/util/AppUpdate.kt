@@ -7,7 +7,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.os.Build
+import androidx.core.content.getSystemService
 import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -20,18 +24,33 @@ import com.github.kr328.clash.common.util.componentName
 import com.github.kr328.clash.service.AppUpdateActivity
 import com.github.kr328.clash.service.R
 import com.github.kr328.clash.service.store.ServiceStore
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.withContext
 import okhttp3.Credentials
+import okhttp3.Dns
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
+import java.io.IOException
+import java.net.InetAddress
+import java.net.Proxy
 import java.security.MessageDigest
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 private const val APP_UPDATE_CHANNEL = "app_update_channel"
+private const val APP_UPDATE_DOWNLOAD_ATTEMPTS = 3
+private const val APP_UPDATE_RETRY_DELAY = 2_000L
 private val appUpdateDownloadLock = Mutex()
 
 suspend fun Context.handleAppUpdateHeaders(source: String, headers: SubscriptionHeaders?) {
@@ -74,79 +93,125 @@ suspend fun Context.handleAppUpdateHeaders(source: String, headers: Subscription
     showAppUpdateNotification(url, expectedCert)
 }
 
-suspend fun Context.downloadAndInstallAppUpdate(url: String, expectedCert: String) {
+suspend fun Context.downloadAndInstallAppUpdate(url: String, expectedCert: String) = withContext(Dispatchers.IO) {
     if (!appUpdateDownloadLock.tryLock()) {
         Log.i("App update download skipped: already running")
-        return
+        return@withContext
     }
 
     try {
         if (!currentSigningCertificateSha256().contains(expectedCert)) {
             Log.w("App update download skipped: signing certificate mismatch")
-            return
+            return@withContext
         }
 
-        val updateDir = appUpdateCacheDir.apply {
-            deleteRecursively()
-            mkdirs()
-        }
         val apk = appUpdateApk
-        val client = appUpdateDownloadClient()
-        val request = Request.Builder()
-            .url(url)
-            .get()
-            .withUrlBasicAuth()
-            .build()
+        val partial = appUpdateCacheDir.resolve("download.apk")
 
         try {
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful)
-                    throw IllegalStateException("Download failed: HTTP ${response.code}")
+            cancelAppUpdateNotifications()
+            check(appUpdateCacheDir.deleteRecursively()) { "Cannot clear app update cache" }
+            check(appUpdateCacheDir.mkdirs()) { "Cannot create app update cache" }
+            val request = Request.Builder()
+                .url(url)
+                .get()
+                .withUrlBasicAuth()
+                .build()
 
-                val body = response.body ?: throw IllegalStateException("Empty response body")
-                val contentLength = body.contentLength()
-                showAppUpdateDownloadProgress(0, contentLength)
-                apk.outputStream().use { output ->
-                    body.byteStream().use { input ->
-                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                        var downloaded = 0L
-                        var lastNotified = 0L
+            for (attempt in 1..APP_UPDATE_DOWNLOAD_ATTEMPTS) {
+                currentCoroutineContext().ensureActive()
+                val network = if (attempt == 1) appUpdateDirectNetwork() else null
+                val route = if (network != null) "direct" else "default"
+                val client = appUpdateDownloadClient(network)
+                Log.i("App update download attempt $attempt/$APP_UPDATE_DOWNLOAD_ATTEMPTS: route=$route")
+                showAppUpdateDownloadProgress(0, -1)
 
-                        while (true) {
-                            val read = input.read(buffer)
-                            if (read < 0)
-                                break
+                try {
+                    downloadAppUpdateAttempt(client, request, partial)
+                    break
+                } catch (e: IOException) {
+                    currentCoroutineContext().ensureActive()
+                    partial.delete()
+                    val permanentHttpError = e is AppUpdateHttpException &&
+                            e.code != 408 && e.code != 429 && e.code !in 500..599
+                    if (attempt == APP_UPDATE_DOWNLOAD_ATTEMPTS || (network == null && permanentHttpError))
+                        throw e
 
-                            output.write(buffer, 0, read)
-                            downloaded += read
-
-                            if (contentLength > 0) {
-                                val progress = downloaded * 100 / contentLength
-                                if (progress != lastNotified) {
-                                    lastNotified = progress
-                                    showAppUpdateDownloadProgress(downloaded, contentLength)
-                                }
-                            }
-                        }
-                    }
+                    Log.w("App update download attempt $attempt failed on $route (${e.javaClass.simpleName}); retrying")
+                    delay(APP_UPDATE_RETRY_DELAY)
                 }
             }
 
-            if (!downloadedApkMatchesCurrentApp(apk)) {
-                apk.delete()
-                Log.w("App update download rejected: APK signature or package name mismatch")
-                return
+            currentCoroutineContext().ensureActive()
+            check(downloadedApkMatchesCurrentApp(partial)) {
+                "App update rejected: APK signature or package name mismatch"
             }
+            check(partial.renameTo(apk)) { "Cannot publish downloaded APK" }
 
             cancelAvailableAppUpdateNotification()
             showAppUpdateReadyNotification()
         } catch (e: Exception) {
+            partial.delete()
             apk.delete()
             showAppUpdateNotification(url, expectedCert)
             throw e
         }
     } finally {
         appUpdateDownloadLock.unlock()
+    }
+}
+
+private class AppUpdateHttpException(val code: Int) : IOException("Download failed: HTTP $code")
+
+private suspend fun Context.downloadAppUpdateAttempt(
+    client: OkHttpClient,
+    request: Request,
+    destination: File,
+) = coroutineScope {
+    val call = client.newCall(request)
+    // Cancel blocking socket reads promptly, but finish closing the file before releasing the download lock.
+    val cancellation = launch(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) {
+        try {
+            awaitCancellation()
+        } finally {
+            call.cancel()
+        }
+    }
+
+    try {
+        call.execute().use { response ->
+            if (response.code != 200)
+                throw AppUpdateHttpException(response.code)
+            val body = response.body ?: throw IOException("Empty response body")
+            val contentLength = body.contentLength()
+            var downloaded = 0L
+            var lastNotified = 0L
+            showAppUpdateDownloadProgress(0, contentLength)
+            destination.outputStream().use { output ->
+                body.byteStream().use { input ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    while (true) {
+                        currentCoroutineContext().ensureActive()
+                        val read = input.read(buffer)
+                        if (read < 0)
+                            break
+                        output.write(buffer, 0, read)
+                        downloaded += read
+                        if (contentLength > 0) {
+                            val progress = downloaded * 100 / contentLength
+                            if (progress != lastNotified) {
+                                lastNotified = progress
+                                showAppUpdateDownloadProgress(downloaded, contentLength)
+                            }
+                        }
+                    }
+                }
+            }
+            if (downloaded == 0L || (contentLength >= 0 && downloaded != contentLength))
+                throw IOException("Incomplete APK download")
+        }
+    } finally {
+        cancellation.cancel()
     }
 }
 
@@ -421,14 +486,45 @@ private fun appUpdateClient(): OkHttpClient {
         .build()
 }
 
-private fun appUpdateDownloadClient(): OkHttpClient {
-    return OkHttpClient.Builder()
+private fun Context.appUpdateDirectNetwork(): Network? {
+    val connectivity = getSystemService<ConnectivityManager>() ?: return null
+    return try {
+        connectivity.allNetworks.mapNotNull { network ->
+            val capabilities = connectivity.getNetworkCapabilities(network) ?: return@mapNotNull null
+            if (!capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) ||
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+            ) {
+                return@mapNotNull null
+            }
+            val priority = when {
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> 0
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> 1
+                else -> 2
+            }
+            network to priority
+        }.minByOrNull { it.second }?.first
+    } catch (e: SecurityException) {
+        Log.w("App update direct network unavailable; using default route")
+        null
+    }
+}
+
+private fun appUpdateDownloadClient(network: Network?): OkHttpClient {
+    val builder = OkHttpClient.Builder()
         .callTimeout(0, TimeUnit.SECONDS)
         .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
         .followRedirects(true)
         .followSslRedirects(true)
-        .build()
+    if (network != null) {
+        // DNS and sockets must use the same physical network, not the VPN's fake-IP DNS.
+        builder.socketFactory(network.socketFactory)
+            .dns(object : Dns {
+                override fun lookup(hostname: String): List<InetAddress> = network.getAllByName(hostname).toList()
+            })
+            .proxy(Proxy.NO_PROXY)
+    }
+    return builder.build()
 }
 
 private val Context.appUpdateCacheDir: File
