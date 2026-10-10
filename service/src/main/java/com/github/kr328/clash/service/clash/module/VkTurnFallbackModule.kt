@@ -13,378 +13,425 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.github.kr328.clash.common.compat.getColorCompat
 import com.github.kr328.clash.common.compat.pendingIntentFlags
+import com.github.kr328.clash.common.constants.Intents
 import com.github.kr328.clash.common.log.Log
 import com.github.kr328.clash.core.Clash
+import com.github.kr328.clash.core.model.BypassConfig
+import com.github.kr328.clash.core.model.CoreHealthCheck
 import com.github.kr328.clash.core.model.LogMessage
 import com.github.kr328.clash.core.model.Proxy
 import com.github.kr328.clash.core.model.ProxySort
+import com.github.kr328.clash.core.model.VkTurnEvent
 import com.github.kr328.clash.service.R
 import com.github.kr328.clash.service.store.ServiceStore
 import com.github.kr328.clash.service.util.AppLogWriter
+import com.github.kr328.clash.service.util.checkBypassConditions
 import com.github.kr328.clash.service.util.importedDir
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import java.net.InetSocketAddress
-import java.net.Socket
-import javax.net.ssl.SSLSocket
-import javax.net.ssl.SSLSocketFactory
+import java.util.UUID
 
 class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
     private val store = ServiceStore(service)
     private val connectivity = service.getSystemService<ConnectivityManager>()
-
-    private var logcat: Job? = null
-    private var watchdog: Job? = null
-    private var resumeWatchdog: Job? = null
-    private var runningArgs: List<String>? = null
-    private var openedCaptchaUrl: String? = null
-    private var waitingForCaptcha = false
+    private val notificationManager = NotificationManagerCompat.from(service)
+    private val fallbackCheckMutex = Mutex()
+    private var moduleScope: CoroutineScope? = null
+    private var configs = emptyList<BypassConfig>()
+    private val instances = linkedMapOf<String, TurnRuntime>()
+    private var winner: String? = null
+    private var startConfirmed = false
+    private var failedChecks = 0
+    private var recoveredChecks = 0
     private var lastAvailableEndpointCount: Int? = null
     private var lastPhysicalNetworkSignature: String? = null
-    private var physicalNetworkSettleUntil = 0L
-    private var moduleScope: CoroutineScope? = null
-    private val fallbackCheckMutex = Mutex()
-    private val notificationManager = NotificationManagerCompat.from(service)
+    private var recoverySince: Long? = null
+    private var recoveryStop: Job? = null
+    private val completedChecks = linkedSetOf<String>()
+    private val roundEndpoints = linkedMapOf<String, MutableSet<String>>()
+    private val missingEndpoints = mutableSetOf<String>()
+    private var openedCaptchaUrl: String? = null
+    private var captchaEndpoint: String? = null
+
+    private class TurnRuntime(val config: BypassConfig, val args: List<String>) {
+        var pendingStart: Job? = null
+        var waitingForHealthCheck = false
+        var expected = false
+        var token = ""
+        var startedAt = 0L
+        var endpointAlive = false
+        var reconnectRound: String? = null
+    }
+
+    private data class HealthSnapshot(
+        val proxies: Map<String, Proxy>,
+        val ordinary: Set<String>,
+        val availableOrdinary: Int,
+        val selected: Set<String>,
+    )
 
     override suspend fun run() = coroutineScope {
-        moduleScope = this
-
-        logInfo("VK TURN fallback module initialized, enabled=${store.vkTurnFallback}")
-
         if (!store.vkTurnFallback) {
             logInfo("VK TURN fallback disabled")
             return@coroutineScope
         }
-
-        logInfo("VK TURN fallback enabled")
-
+        moduleScope = this
         createCaptchaNotificationChannel()
-
-        val captchaSubmitted = receiveBroadcast(false) {
-            addAction(CAPTCHA_SUBMITTED_ACTION)
-        }
-        val screenToggle = receiveBroadcast(false) {
-            addAction(Intent.ACTION_SCREEN_ON)
-        }
-
-        launch {
-            for (ignored in captchaSubmitted) {
-                openedCaptchaUrl = null
-                waitingForCaptcha = false
-                logInfo("VK TURN fallback captcha submitted")
-                cancelCaptchaNotification()
-                scheduleHealthWatchdog("captcha submitted")
-            }
-        }
-
-        launch {
-            for (ignored in screenToggle) {
-                wakeIfRunning("screen on")
-                restartIfExpectedButStopped("screen on")
-                scheduleHealthWatchdog("screen on")
-            }
-        }
-
-        launch {
-            while (isActive) {
-                delay(RUNNING_WATCHDOG_INTERVAL)
-                restartIfExpectedButStopped("running watchdog")
-            }
-        }
-
-        logcat = launch {
-            coroutineScope {
-                launch {
-                    val events = Clash.subscribeVkTurnEvents()
-
-                    try {
-                        for (line in events) {
-                            handleProcessLine(line)
-                        }
-                    } finally {
-                        events.cancel()
-                    }
-                }
-
-                launch {
-                    val logs = Clash.subscribeLogcat()
-
-                    try {
-                        for (message in logs) {
-                            if (message.message.contains(VK_TURN_LOG_PREFIX)) {
-                                handleProcessLine(message.message)
-                            }
-                        }
-                    } finally {
-                        logs.cancel()
-                    }
-                }
-            }
-        }
-
-        delay(INITIAL_DELAY)
+        val healthChecks = Clash.subscribeHealthCheckEvents()
+        val events = Clash.subscribeVkTurnEvents()
+        val profileLoaded = receiveBroadcast { addAction(Intents.ACTION_PROFILE_LOADED) }
+        val screenOn = receiveBroadcast(false) { addAction(Intent.ACTION_SCREEN_ON) }
+        val captchaSubmitted = receiveBroadcast(false) { addAction(CAPTCHA_SUBMITTED_ACTION) }
 
         try {
-            while (isActive) {
-                val args = readFallbackArguments()
-
-                if (args == null) {
-                    logInfo("VK TURN fallback arguments are absent")
-                    stopProcess("fallback configuration is absent")
-                } else {
-                    checkFallbackLocked(args, "periodic check")
+            fallbackCheckMutex.withLock { refreshConfiguration() }
+            launch {
+                for (ignored in profileLoaded) {
+                    fallbackCheckMutex.withLock {
+                        refreshConfiguration()
+                        resetHealthState()
+                    }
                 }
-
-                delay(CHECK_INTERVAL)
+            }
+            launch {
+                for (ignored in captchaSubmitted) {
+                    fallbackCheckMutex.withLock { clearCaptcha() }
+                }
+            }
+            launch {
+                for (ignored in screenOn) {
+                    withContext(Dispatchers.IO) { Clash.wakeVkTurn() }
+                    fallbackCheckMutex.withLock { restartStoppedInstances() }
+                }
+            }
+            launch {
+                while (isActive) {
+                    delay(RUNNING_WATCHDOG_INTERVAL)
+                    fallbackCheckMutex.withLock { restartStoppedInstances() }
+                }
+            }
+            launch {
+                for (event in events) {
+                    fallbackCheckMutex.withLock { handleTurnEvent(event) }
+                }
+            }
+            for (check in healthChecks) {
+                fallbackCheckMutex.withLock { handleHealthCheck(check) }
             }
         } finally {
-            stopProcess("service stopped")
-            runCatching {
-                logcat?.cancelAndJoin()
+            healthChecks.cancel()
+            events.cancel()
+            withContext(NonCancellable) {
+                fallbackCheckMutex.withLock {
+                    stopAll("service stopped")
+                    withContext(Dispatchers.IO) { Clash.stopVkTurn() }
+                    moduleScope = null
+                }
+            }
+        }
+    }
+
+    private suspend fun refreshConfiguration() {
+        val loaded = withContext(Dispatchers.IO) {
+            val profile = store.activeProfile ?: return@withContext emptyList()
+            val path = service.importedDir.resolve(profile.toString()).resolve("config.yaml")
+            if (!path.isFile) return@withContext emptyList()
+            runCatching { Clash.readBypassConfig(path.absolutePath) }.onFailure {
+                logWarning("Cannot read bypass configuration", it)
+            }.getOrNull().orEmpty()
+        }
+        if (loaded == configs) return
+        stopAll("bypass configuration changed")
+        configs = loaded
+        instances.clear()
+        missingEndpoints.clear()
+        for (config in configs) {
+            if (config.type != "turn") {
+                logInfo("Bypass type '${config.type}' is not supported: ${config.endpoint}")
+                continue
+            }
+            runCatching { parseCommandLine(config.config) }.onSuccess {
+                if (it.isNotEmpty()) instances[config.endpoint] = TurnRuntime(config, it)
             }.onFailure {
-                logWarning("VK TURN fallback logcat cancel failed: ${it.message}", it)
+                logWarning("Invalid TURN arguments for ${config.endpoint}", it)
             }
-            logcat = null
-            watchdog?.cancel()
-            watchdog = null
-            resumeWatchdog?.cancel()
-            resumeWatchdog = null
-            moduleScope = null
         }
+        resetHealthState()
+        logInfo("VK TURN fallback configured endpoints=${instances.keys.joinToString()}")
     }
 
-    private suspend fun restartIfExpectedButStopped(reason: String) {
-        val args = runningArgs ?: return
-
-        val coreRunning = runCatching {
-            Clash.isVkTurnRunning()
-        }.getOrDefault(false)
-
-        if (coreRunning)
-            return
-
-        logWarning("VK TURN fallback expected to run, but core is stopped after $reason; restarting")
-        runningArgs = null
-        openedCaptchaUrl = null
-        waitingForCaptcha = false
-        lastAvailableEndpointCount = 0
-        watchdog?.cancel()
-        watchdog = null
-        cancelCaptchaNotification()
-        startProcess(args)
-    }
-
-    private fun wakeIfRunning(reason: String) {
-        if (runningArgs == null)
-            return
-
+    private suspend fun readHealthSnapshot(): HealthSnapshot? = withContext(Dispatchers.IO) {
         runCatching {
-            Clash.wakeVkTurn()
-        }.onSuccess {
-            logInfo("VK TURN fallback wake requested after $reason")
-        }.onFailure {
-            logWarning("VK TURN fallback wake after $reason failed: ${it.message}", it)
-        }
-    }
-
-    private fun scheduleHealthWatchdog(reason: String) {
-        val args = runningArgs ?: return
-        val scope = moduleScope ?: return
-
-        if (waitingForCaptcha) {
-            logInfo("VK TURN fallback health watchdog after $reason postponed: waiting for captcha")
-            return
-        }
-
-        if (resumeWatchdog?.isActive == true)
-            return
-
-        resumeWatchdog = scope.launch {
-            delay(HEALTH_WATCHDOG_DELAY)
-
-            resumeWatchdog = null
-
-            if (runningArgs != args || waitingForCaptcha)
-                return@launch
-
-            val coreRunning = runCatching {
-                Clash.isVkTurnRunning()
-            }.getOrDefault(false)
-
-            if (!coreRunning) {
-                logWarning("VK TURN fallback health watchdog after $reason: core is stopped; restarting")
-                confirmFallbackStartLocked(args, "health watchdog after $reason: core stopped")
-                return@launch
+            val groups = Clash.queryGroupNames(false).associateWith {
+                Clash.queryGroup(it, ProxySort.Default)
             }
-
-            val availableEndpoints = runHealthCheck("health watchdog after $reason")
-
-            if (availableEndpoints != null && availableEndpoints > 0) {
-                logInfo("VK TURN fallback health watchdog after $reason: availableEndpoints=$availableEndpoints")
-                return@launch
+            if (groups.isEmpty()) return@withContext null
+            val proxies = groups.values.flatMap { it.proxies }.associateBy { it.name }
+            for (endpoint in instances.keys) {
+                if (proxies[endpoint]?.let(::isEndpoint) != true && missingEndpoints.add(endpoint))
+                    logWarning("Bypass endpoint '$endpoint' is not an existing leaf proxy; startup skipped")
             }
-
-            logWarning(
-                "VK TURN fallback health watchdog after $reason: no available endpoints " +
-                        "after ${HEALTH_WATCHDOG_DELAY / 1000}s; restarting"
+            val excluded = configs.map { it.endpoint }.toSet()
+            val ordinary = proxies.values.filter(::isEndpoint).map { it.name }.toSet() - excluded
+            val children = groups.values.flatMap { group ->
+                group.proxies.filter { it.isGroup }.map { it.name }
+            }.toSet()
+            val roots = (groups.keys - children).ifEmpty { groups.keys }
+            fun selectedLeaf(name: String, visited: MutableSet<String>): String? {
+                if (!visited.add(name)) return null
+                val group = groups[name] ?: return name
+                return selectedLeaf(group.now, visited)
+            }
+            HealthSnapshot(
+                proxies, ordinary,
+                ordinary.count { name -> proxies[name]?.let(::isAvailableEndpoint) == true },
+                roots.mapNotNull { selectedLeaf(it, mutableSetOf()) }.toSet(),
             )
-
-            confirmFallbackStartLocked(args, "health watchdog after $reason failed")
-        }
-    }
-
-    private suspend fun readFallbackArguments(): List<String>? = withContext(Dispatchers.IO) {
-        val profile = store.activeProfile
-        if (profile == null) {
-            logInfo("VK TURN fallback active profile is absent")
-
-            return@withContext null
-        }
-
-        val config = service.importedDir
-            .resolve(profile.toString())
-            .resolve("config.yaml")
-
-        if (!config.isFile) {
-            logInfo("VK TURN fallback config is absent: ${config.absolutePath}")
-
-            return@withContext null
-        }
-
-        runCatching {
-            val commandLine = Clash.readVkTurnConfig(config.absolutePath)
-            if (commandLine == null) {
-                logInfo("VK TURN fallback has no usable turn configuration")
-                return@withContext null
-            }
-            parseCommandLine(commandLine)
-        }.getOrElse {
-            logWarning("VK TURN fallback arguments are invalid", it)
-
-            null
-        }?.takeIf { it.isNotEmpty() }
-    }
-
-    private suspend fun availableEndpointCount(): Int {
-        val groups = Clash.queryGroupNames(false)
-
-        if (groups.isEmpty())
-            return STOP_THRESHOLD
-
-        val completed = withTimeoutOrNull(HEALTH_CHECK_TIMEOUT) {
-            Clash.healthCheckAll().await()
-            true
-        } == true
-
-        check(completed) { "health check timeout for all groups" }
-
-        return groups.flatMap { group ->
-            runCatching {
-                Clash.queryGroup(group, ProxySort.Delay).proxies.filter(::isAvailableEndpoint)
-            }.getOrDefault(emptyList())
-        }.map { it.name }.distinct().size
-    }
-
-    private suspend fun checkFallbackLocked(args: List<String>, reason: String) {
-        fallbackCheckMutex.withLock {
-            checkFallback(args, reason)
-        }
-    }
-
-    private suspend fun checkFallback(args: List<String>, reason: String) {
-        if (!awaitPhysicalNetworkSettle(reason))
-            return
-
-        val availableEndpoints = runHealthCheck("$reason health check") ?: run {
-            confirmFallbackStart(args, "$reason health check failed")
-            return
-        }
-
-        logInfo(
-            "VK TURN fallback check: availableEndpoints=$availableEndpoints " +
-                    "args=${args.joinToString(" ")}"
-        )
-
-        when {
-            availableEndpoints == 0 -> confirmFallbackStart(args, "$reason found no available endpoints")
-            availableEndpoints >= STOP_THRESHOLD -> stopProcess(
-                "$availableEndpoints endpoints are available"
-            )
-        }
-    }
-
-    private suspend fun runHealthCheck(reason: String): Int? {
-        return runCatching {
-            availableEndpointCount()
-        }.onSuccess {
-            noteEndpointAvailability(it, reason)
         }.onFailure {
-            logWarning("VK TURN fallback $reason failed", it)
+            logWarning("VK TURN cannot read core health results", it)
         }.getOrNull()
     }
 
-    private suspend fun confirmFallbackStartLocked(args: List<String>, reason: String) {
-        fallbackCheckMutex.withLock {
-            confirmFallbackStart(args, reason)
+    private suspend fun nativeStates(): Map<String, String> = withContext(Dispatchers.IO) {
+        Clash.queryVkTurnStates()
+    }
+
+    private suspend fun handleHealthCheck(check: CoreHealthCheck) {
+        val signature = physicalNetworkSignature()
+        if (signature != lastPhysicalNetworkSignature) {
+            resetHealthState()
+            instances.values.forEach { it.endpointAlive = false }
+            lastPhysicalNetworkSignature = signature
+        }
+        if (signature == null || check.round in completedChecks) return
+        if (!check.finished) {
+            val endpoints = roundEndpoints.getOrPut(check.round) { mutableSetOf() }
+            if (!endpoints.add(check.endpoint)) return
+            if (roundEndpoints.size > MAX_COMPLETED_CHECKS)
+                roundEndpoints.remove(roundEndpoints.keys.first())
+            val runtime = instances[check.endpoint] ?: return
+            if (!runtime.expected || check.time < runtime.startedAt) return
+            runtime.endpointAlive = check.alive
+            if (!check.alive) {
+                if (winner == check.endpoint) winner = null
+                if (runtime.reconnectRound != check.round) {
+                    // The core accepts reconnect only after its first-stream warm-up barrier ends.
+                    val accepted = withContext(Dispatchers.IO) { Clash.reconnectVkTurn(check.endpoint) }
+                    if (accepted) {
+                        runtime.reconnectRound = check.round
+                        logInfo("VK TURN endpoint ${check.endpoint} health check failed; reconnect requested")
+                    }
+                }
+            }
+            val snapshot = readHealthSnapshot() ?: return
+            reconcileWinner(snapshot)
+            if (!check.alive && lastAvailableEndpointCount == 0) scheduleStarts(signature)
+            return
+        }
+        val checkedEndpoints = roundEndpoints.remove(check.round).orEmpty()
+        completedChecks.add(check.round)
+        if (completedChecks.size > MAX_COMPLETED_CHECKS) completedChecks.remove(completedChecks.first())
+        val snapshot = readHealthSnapshot() ?: return
+        reconcileWinner(snapshot)
+        // A round checking only a helper cannot confirm failure/recovery of ordinary proxies.
+        if (snapshot.ordinary.isNotEmpty() && checkedEndpoints.none { it in snapshot.ordinary }) return
+        instances.values.forEach { it.waitingForHealthCheck = false }
+        val available = snapshot.availableOrdinary
+        lastAvailableEndpointCount = available
+        logInfo("VK TURN core health check: availableOrdinaryEndpoints=$available")
+        if (available == 0) {
+            cancelRecoveryStop()
+            recoveredChecks = 0
+            failedChecks = (failedChecks + 1).coerceAtMost(REQUIRED_CHECKS)
+            if (failedChecks >= REQUIRED_CHECKS && !startConfirmed) {
+                startConfirmed = true
+                logInfo("VK TURN fallback confirmed by the second failed ordinary check")
+            }
+            scheduleStarts(signature)
+        } else {
+            instances.values.forEach { cancelPendingStart(it) }
+            failedChecks = 0
+            if (!startConfirmed) {
+                stopAll("ordinary endpoints recovered before startup was confirmed")
+                return
+            }
+            recoveredChecks = (recoveredChecks + 1).coerceAtMost(REQUIRED_CHECKS)
+            scheduleRecoveryStop(signature)
         }
     }
 
-    private suspend fun confirmFallbackStart(args: List<String>, reason: String) {
-        if (!awaitPhysicalNetworkSettle(reason))
-            return
-
-        val vkLink = findArgument(args, "-vk-link")
-        if (vkLink != null && !isVkLinkReachable(vkLink)) {
-            logWarning(
-                "VK TURN fallback start postponed after $reason: " +
-                        "${Uri.parse(vkLink).host ?: vkLink} is unavailable"
-            )
-            return
+    private suspend fun reconcileWinner(snapshot: HealthSnapshot) {
+        val states = nativeStates()
+        val eligible = instances.values.filter {
+            it.expected && it.endpointAlive && states[it.config.endpoint] in RUNNING_STATES &&
+                it.config.endpoint in snapshot.selected &&
+                snapshot.proxies[it.config.endpoint]?.let(::isAvailableEndpoint) == true
         }
-
-        val confirmedEndpoints = runHealthCheck("confirmation health check after $reason")
-        if (confirmedEndpoints != 0) {
-            logInfo(
-                "VK TURN fallback start skipped after $reason: " +
-                        "confirmation availableEndpoints=${confirmedEndpoints ?: "failed"}"
-            )
-            return
+        val selected = eligible.firstOrNull { it.config.endpoint == winner } ?: eligible.firstOrNull()
+        winner = selected?.config?.endpoint
+        if (selected == null) return
+        instances.values.filter { it !== selected }.forEach { cancelPendingStart(it) }
+        withContext(Dispatchers.IO) { Clash.cancelVkTurnExcept(selected.config.endpoint) }
+        for (runtime in instances.values) {
+            if (runtime !== selected) stopInstance(runtime, "Clash selected ${selected.config.endpoint}")
         }
-
-        logInfo("VK TURN fallback start confirmed after $reason")
-        startProcess(args)
     }
 
-    private suspend fun awaitPhysicalNetworkSettle(reason: String): Boolean {
-        while (true) {
-            val signature = physicalNetworkSignature()
-            if (signature == null) {
-                logInfo("VK TURN fallback check postponed after $reason: no physical network")
-                return false
+    private fun scheduleStarts(signature: String) {
+        if (winner != null) return
+        for (runtime in instances.values) {
+            if (runtime.expected || runtime.waitingForHealthCheck || runtime.pendingStart?.isActive == true) continue
+            val scope = moduleScope ?: return
+            runtime.pendingStart = scope.launch {
+                val job = coroutineContext[Job]
+                try {
+                    val conditionsMet = service.checkBypassConditions(runtime.config.check) { domain, result, expected ->
+                        logInfo("VK TURN startup check endpoint=${runtime.config.endpoint} domain=$domain result=$result expected=$expected")
+                    }
+                    if (!conditionsMet) {
+                        fallbackCheckMutex.withLock {
+                            if (instances[runtime.config.endpoint] === runtime && runtime.pendingStart === job) {
+                                runtime.waitingForHealthCheck = true
+                                // Release this attempt before another health round can authorize a retry.
+                                runtime.pendingStart = null
+                                logInfo("VK TURN startup conditions not met: ${runtime.config.endpoint}; waiting for the next ordinary health check")
+                            }
+                        }
+                        return@launch
+                    }
+                    fallbackCheckMutex.withLock {
+                        if (instances[runtime.config.endpoint] !== runtime || winner != null ||
+                            lastAvailableEndpointCount != 0 || physicalNetworkSignature() != signature)
+                            return@withLock
+                        val snapshot = readHealthSnapshot() ?: return@withLock
+                        if (snapshot.availableOrdinary != 0 || physicalNetworkSignature() != signature ||
+                            snapshot.proxies[runtime.config.endpoint]?.let(::isEndpoint) != true)
+                            return@withLock
+                        reconcileWinner(snapshot)
+                        if (winner != null) return@withLock
+                        runtime.token = UUID.randomUUID().toString()
+                        runtime.startedAt = System.currentTimeMillis()
+                        runtime.endpointAlive = false
+                        runCatching {
+                            withContext(Dispatchers.IO) {
+                                Clash.startVkTurn(runtime.config.endpoint, runtime.args, runtime.token)
+                            }
+                        }.onSuccess {
+                            runtime.expected = true
+                            logInfo("VK TURN started endpoint=${runtime.config.endpoint}")
+                        }.onFailure {
+                            if (it is CancellationException) throw it
+                            logWarning("VK TURN start failed endpoint=${runtime.config.endpoint}", it)
+                        }
+                    }
+                } finally {
+                    withContext(NonCancellable) {
+                        fallbackCheckMutex.withLock {
+                            if (runtime.pendingStart === job) runtime.pendingStart = null
+                        }
+                    }
+                }
             }
+        }
+    }
 
-            val now = SystemClock.elapsedRealtime()
-            if (signature != lastPhysicalNetworkSignature) {
-                lastPhysicalNetworkSignature = signature
-                physicalNetworkSettleUntil = now + NETWORK_SETTLE_DELAY
-                logInfo("VK TURN fallback physical network changed after $reason; delaying checks")
+    private suspend fun restartStoppedInstances() {
+        if (lastAvailableEndpointCount != 0 || physicalNetworkSignature() != lastPhysicalNetworkSignature)
+            return
+        val signature = lastPhysicalNetworkSignature ?: return
+        val states = nativeStates()
+        for (runtime in instances.values) {
+            if (runtime.expected && states[runtime.config.endpoint] !in RUNNING_STATES) {
+                runtime.expected = false
+                runtime.endpointAlive = false
+                if (winner == runtime.config.endpoint) winner = null
+                logWarning("VK TURN stopped unexpectedly: ${runtime.config.endpoint}")
             }
+        }
+        scheduleStarts(signature)
+    }
 
-            val remaining = physicalNetworkSettleUntil - now
-            if (remaining <= 0)
-                return true
+    private fun cancelPendingStart(runtime: TurnRuntime) {
+        runtime.pendingStart?.cancel()
+        runtime.pendingStart = null
+    }
 
-            delay(remaining)
+    private suspend fun stopInstance(runtime: TurnRuntime, reason: String) {
+        cancelPendingStart(runtime)
+        if (!runtime.expected) return
+        runCatching {
+            withContext(Dispatchers.IO) { Clash.stopVkTurn(runtime.config.endpoint) }
+        }.onSuccess {
+            runtime.expected = false
+            runtime.endpointAlive = false
+            runtime.token = ""
+            if (captchaEndpoint == runtime.config.endpoint) clearCaptcha()
+            logInfo("VK TURN stopped endpoint=${runtime.config.endpoint}: $reason")
+        }.onFailure {
+            logWarning("VK TURN stop failed endpoint=${runtime.config.endpoint}", it)
+        }
+    }
+
+    private suspend fun stopAll(reason: String) {
+        instances.values.forEach { cancelPendingStart(it) }
+        withContext(Dispatchers.IO) { Clash.cancelVkTurnExcept("") }
+        for (runtime in instances.values) stopInstance(runtime, reason)
+        winner = null
+        startConfirmed = false
+        failedChecks = 0
+        recoveredChecks = 0
+        lastAvailableEndpointCount = null
+        cancelRecoveryStop()
+        clearCaptcha()
+    }
+
+    private fun resetHealthState() {
+        instances.values.forEach { cancelPendingStart(it) }
+        cancelRecoveryStop()
+        failedChecks = 0
+        recoveredChecks = 0
+        if (instances.values.none { it.expected }) startConfirmed = false
+        lastAvailableEndpointCount = null
+        completedChecks.clear()
+        roundEndpoints.clear()
+    }
+
+    private fun cancelRecoveryStop() {
+        recoveryStop?.cancel()
+        recoveryStop = null
+        recoverySince = null
+    }
+
+    private fun scheduleRecoveryStop(signature: String) {
+        if (!startConfirmed || recoveryStop?.isActive == true) return
+        val scope = moduleScope ?: return
+        val since = recoverySince ?: SystemClock.elapsedRealtime().also { recoverySince = it }
+        recoveryStop = scope.launch {
+            delay((RECOVERY_STOP_DELAY - (SystemClock.elapsedRealtime() - since)).coerceAtLeast(0L))
+            fallbackCheckMutex.withLock {
+                recoveryStop = null
+                if (!startConfirmed || recoveredChecks < REQUIRED_CHECKS ||
+                    physicalNetworkSignature() != signature) return@withLock
+                val snapshot = readHealthSnapshot() ?: return@withLock
+                if (physicalNetworkSignature() != signature) return@withLock
+                if (snapshot.availableOrdinary == 0) {
+                    recoveredChecks = 0
+                    cancelRecoveryStop()
+                    return@withLock
+                }
+                stopAll("ordinary endpoints recovered for ${RECOVERY_STOP_DELAY / 1000}s")
+                withContext(Dispatchers.IO) { Clash.closeAllConnections() }
+            }
         }
     }
 
@@ -392,158 +439,38 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         val networks = connectivity?.allNetworks.orEmpty().mapNotNull { network ->
             val capabilities = connectivity?.getNetworkCapabilities(network) ?: return@mapNotNull null
             if (!capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) ||
-                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
-            ) {
-                return@mapNotNull null
-            }
-
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) return@mapNotNull null
             network.toString()
         }.sorted()
-
-        return networks.takeIf { it.isNotEmpty() }?.joinToString(separator = ",")
+        return networks.takeIf { it.isNotEmpty() }?.joinToString(",")
     }
 
-    private fun isAvailableEndpoint(proxy: Proxy): Boolean {
-        if (proxy.isGroup)
-            return false
+    private fun isEndpoint(proxy: Proxy): Boolean = !proxy.isGroup && proxy.type !in NON_ENDPOINT_TYPES
 
-        if (proxy.type in NON_ENDPOINT_TYPES)
-            return false
+    private fun isAvailableEndpoint(proxy: Proxy): Boolean =
+        isEndpoint(proxy) && proxy.delay in 1 until UNAVAILABLE_DELAY
 
-        return proxy.delay in 1 until UNAVAILABLE_DELAY
-    }
-
-    private suspend fun startProcess(args: List<String>) {
-        if (runningArgs == args) {
-            if (Clash.isVkTurnRunning()) {
-                scheduleHealthWatchdog("periodic check with no available endpoints")
-                return
-            }
-
-            logWarning("VK TURN fallback state was running, but core is stopped; restarting")
-            runningArgs = null
-            openedCaptchaUrl = null
-            waitingForCaptcha = false
-            lastAvailableEndpointCount = 0
-            watchdog?.cancel()
-            watchdog = null
-            cancelCaptchaNotification()
-        }
-
-        if (runningArgs != null)
-            stopProcess("fallback arguments changed")
-
-        runCatching {
-            logInfo("VK TURN fallback starting in core: ${args.joinToString(" ")}")
-
-            Clash.startVkTurn(args)
-        }.onSuccess {
-            runningArgs = args
-            logInfo("VK TURN fallback started")
-            scheduleHealthWatchdog("start")
-        }.onFailure {
-            logWarning("VK TURN fallback start failed: ${it.message}", it)
-        }
-    }
-
-    private fun findArgument(args: List<String>, name: String): String? {
-        args.forEachIndexed { index, argument ->
-            when {
-                argument == name -> return args.getOrNull(index + 1)
-                argument.startsWith("$name=") -> return argument.substringAfter('=')
-            }
-        }
-
-        return null
-    }
-
-    private suspend fun isVkLinkReachable(link: String): Boolean = withContext(Dispatchers.IO) {
-        val uri = runCatching { Uri.parse(link) }.getOrNull() ?: return@withContext false
-        val host = uri.host?.takeIf { it.isNotBlank() } ?: return@withContext false
-        val port = uri.port.takeIf { it > 0 } ?: when (uri.scheme?.lowercase()) {
-            "http" -> 80
-            else -> 443
-        }
-
-        val physicalNetworks = connectivity?.allNetworks.orEmpty().filter { network ->
-            connectivity?.getNetworkCapabilities(network)?.let { capabilities ->
-                capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-                        !capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
-            } == true
-        }
-
-        runCatching {
-            val addresses = Clash.resolveVkTurnHost(host)
-            check(addresses.isNotEmpty()) { "VK TURN resolver cannot resolve $host" }
-
-            val networkTargets = physicalNetworks.flatMap { network ->
-                addresses.map { address -> network to address }
-            }
-
-            check(networkTargets.isNotEmpty()) { "no physical network available for $host" }
-
-            var lastError: Throwable? = null
-            for ((network, address) in networkTargets) {
-                val connected = runCatching {
-                    network.socketFactory.createSocket().use { socket ->
-                        checkReachabilitySocket(socket, host, address, port, uri)
-                    }
-                }.onFailure { lastError = it }.isSuccess
-
-                if (connected)
-                    return@runCatching
-            }
-
-            throw lastError ?: IllegalStateException("unable to connect to $host")
-        }.onFailure {
-            logInfo("VK TURN fallback reachability check failed for $host:$port: ${it.message}")
-        }.isSuccess
-    }
-
-    private fun checkReachabilitySocket(
-        socket: Socket,
-        tlsHost: String,
-        address: String,
-        port: Int,
-        uri: Uri,
-    ) {
-        socket.connect(InetSocketAddress(address, port), VK_REACHABILITY_TIMEOUT)
-        socket.soTimeout = VK_REACHABILITY_TIMEOUT
-
-        if (uri.scheme.equals("https", ignoreCase = true)) {
-            val tls = (SSLSocketFactory.getDefault() as SSLSocketFactory)
-                .createSocket(socket, tlsHost, port, false) as SSLSocket
-            tls.use {
-                it.soTimeout = VK_REACHABILITY_TIMEOUT
-                it.startHandshake()
-            }
-        }
-    }
-
-    private fun stopProcess(reason: String) {
-        val coreRunning = runCatching {
-            Clash.isVkTurnRunning()
-        }.getOrDefault(false)
-
-        if (runningArgs == null && !coreRunning)
-            return
-
-        runningArgs = null
+    private fun clearCaptcha() {
         openedCaptchaUrl = null
-        waitingForCaptcha = false
-        lastAvailableEndpointCount = null
-        watchdog?.cancel()
-        watchdog = null
-        resumeWatchdog?.cancel()
-        resumeWatchdog = null
+        captchaEndpoint = null
         cancelCaptchaNotification()
+    }
 
-        logInfo("VK TURN fallback stopping: $reason")
-
-        runCatching {
-            Clash.stopVkTurn()
-        }.onFailure {
-            logWarning("VK TURN fallback stop failed: ${it.message}", it)
+    private fun handleTurnEvent(event: VkTurnEvent) {
+        val runtime = instances[event.endpoint] ?: return
+        if (!runtime.expected || runtime.token != event.token) return
+        val url = event.captcha
+        if (url != null) {
+            if (url.isBlank()) {
+                if (captchaEndpoint == event.endpoint) clearCaptcha()
+            } else {
+                normalizeCaptchaUrl(url)?.let {
+                    captchaEndpoint = event.endpoint
+                    handleCaptchaUrl(it)
+                }
+            }
+        } else if (event.message.startsWith("[State]")) {
+            logInfo("VK TURN endpoint=${event.endpoint} ${event.message}")
         }
     }
 
@@ -589,73 +516,6 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         return result
     }
 
-    private fun noteEndpointAvailability(availableEndpoints: Int, reason: String) {
-        val previous = lastAvailableEndpointCount
-        lastAvailableEndpointCount = availableEndpoints
-
-        if (previous != 0 || availableEndpoints <= 0)
-            return
-
-        logInfo(
-            "VK TURN fallback endpoints recovered after $reason; " +
-                    "closing active Clash connections"
-        )
-
-        runCatching {
-            Clash.closeAllConnections()
-        }.onFailure {
-            logWarning("VK TURN fallback failed to close active connections: ${it.message}", it)
-        }
-    }
-
-    private fun handleProcessLine(line: String) {
-        if (line.startsWith("[State]")) {
-            logInfo("VK TURN fallback event received: $line")
-
-            if (line.contains("[State] captcha", ignoreCase = true)) {
-                openedCaptchaUrl = null
-                waitingForCaptcha = true
-                resumeWatchdog?.cancel()
-                resumeWatchdog = null
-            }
-        }
-
-        if (line.contains("CAPTCHA_URL") ||
-            line.contains("ACTION REQUIRED") ||
-            line.contains("Triggering manual captcha fallback", ignoreCase = true)) {
-            logInfo("VK TURN fallback event received: $line")
-        }
-
-        if (line.contains("Established DTLS connection!", ignoreCase = true) ||
-            line.contains("DTLS connection established", ignoreCase = true)) {
-            logInfo("VK TURN fallback DTLS established")
-        }
-
-        if (line.contains("ACTION REQUIRED") ||
-            line.contains("Triggering manual captcha fallback", ignoreCase = true)) {
-            openedCaptchaUrl = null
-            waitingForCaptcha = true
-            resumeWatchdog?.cancel()
-            resumeWatchdog = null
-        }
-
-        extractCaptchaUrl(line)?.let(::handleCaptchaUrl)
-    }
-
-    private fun extractCaptchaUrl(line: String): CaptchaUrl? {
-        val raw = CAPTCHA_URL_MARKERS
-            .firstNotNullOfOrNull { marker ->
-                line.substringAfter(marker, missingDelimiterValue = "")
-                    .trim()
-                    .takeIf { it.isNotBlank() }
-            }
-            ?: CAPTCHA_URL_REGEX.find(line)?.value
-            ?.trim()
-            ?: return null
-
-        return normalizeCaptchaUrl(raw)
-    }
-
     private fun normalizeCaptchaUrl(raw: String): CaptchaUrl? {
         val uri = runCatching { Uri.parse(raw) }.getOrNull() ?: return null
 
@@ -689,10 +549,6 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
 
     private fun handleCaptchaUrl(captcha: CaptchaUrl) {
         val url = captcha.url
-
-        waitingForCaptcha = true
-        resumeWatchdog?.cancel()
-        resumeWatchdog = null
 
         if (openedCaptchaUrl == url)
             return
@@ -782,16 +638,12 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
             "com.github.kr328.clash.action.VK_TURN_CAPTCHA_SUBMITTED"
         private const val CAPTCHA_PORT = 8765
         private const val CAPTCHA_PATH = "/not_robot_captcha"
-        private const val INITIAL_DELAY = 5_000L
-        private const val CHECK_INTERVAL = 30_000L
         private const val RUNNING_WATCHDOG_INTERVAL = 15_000L
-        private const val HEALTH_WATCHDOG_DELAY = 90_000L
-        private const val HEALTH_CHECK_TIMEOUT = 30_000L
-        private const val NETWORK_SETTLE_DELAY = 2_000L
-        private const val VK_REACHABILITY_TIMEOUT = 5_000
+        private const val RECOVERY_STOP_DELAY = 60_000L
+        private const val REQUIRED_CHECKS = 2
+        private val RUNNING_STATES = setOf("connecting", "connected", "captcha")
+        private const val MAX_COMPLETED_CHECKS = 64
         private const val UNAVAILABLE_DELAY = 0xffff
-        private const val STOP_THRESHOLD = 2
-        private const val VK_TURN_LOG_PREFIX = "[VK_TURN]"
 
         private val NON_ENDPOINT_TYPES = setOf(
             "Direct",

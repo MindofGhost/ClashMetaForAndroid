@@ -39,6 +39,8 @@ class NetworkObserveModule(service: Service) : Module<Network>(service) {
     @Volatile
     private var curDnsList = emptyList<String>()
 
+    private var lastTurnNetwork: Network? = null
+
     private val callback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
             Log.i("NetworkObserve onAvailable network=$network")
@@ -58,6 +60,7 @@ class NetworkObserveModule(service: Service) : Module<Network>(service) {
             Log.i("NetworkObserve onLost network=$network")
             networkInfos.remove(network)
             notifyDnsChange()
+            reconnectTurnOnNetworkChange()
 
             networks.trySend(network)
         }
@@ -66,6 +69,7 @@ class NetworkObserveModule(service: Service) : Module<Network>(service) {
             Log.i("NetworkObserve onLinkPropertiesChanged network=$network $linkProperties")
             networkInfos[network]?.dnsList = linkProperties.dnsServers
             notifyDnsChange()
+            reconnectTurnOnNetworkChange()
             ProfileWorker.requestUpdateStale(service)
 
             networks.trySend(network)
@@ -100,7 +104,7 @@ class NetworkObserveModule(service: Service) : Module<Network>(service) {
         return false
     }
 
-    private fun networkToInt(entry: Map.Entry<Network, NetworkInfo>): Int {
+    private fun networkToInt(entry: Map.Entry<Network, NetworkInfo>, includeLosing: Boolean = true): Int {
         val capabilities = connectivity.getNetworkCapabilities(entry.key)
         // calculate priority based on transport type, available state
         // lower value means higher priority
@@ -116,7 +120,25 @@ class NetworkObserveModule(service: Service) : Module<Network>(service) {
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_SATELLITE) -> 5
             // TRANSPORT_LOWPAN / TRANSPORT_THREAD / TRANSPORT_WIFI_AWARE are not for general internet access, which will not set as default route.
             else -> 20
-        } + (if (entry.value.isAvailable()) 0 else 10)
+        } + (if (!includeLosing || entry.value.isAvailable()) 0 else 10)
+    }
+
+    private fun reconnectTurnOnNetworkChange() {
+        // Keep using the old network until it is lost; onLosing alone is not a route change.
+        val network = networkInfos.asSequence()
+            .minByOrNull { networkToInt(it, includeLosing = false) }?.key ?: return
+        val previous = lastTurnNetwork
+        lastTurnNetwork = network
+        if (previous == null || previous == network) return
+
+        try {
+            if (Clash.isVkTurnRunning()) {
+                Log.i("VK TURN physical network changed: $previous -> $network; reconnecting")
+                Clash.reconnectVkTurn()
+            }
+        } catch (e: Exception) {
+            Log.w("VK TURN network reconnect failed", e)
+        }
     }
 
     private fun notifyDnsChange() {

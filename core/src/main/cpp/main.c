@@ -196,6 +196,56 @@ Java_com_github_kr328_clash_core_bridge_Bridge_nativeReadVkTurnConfig(JNIEnv *en
 }
 
 JNIEXPORT jstring JNICALL
+Java_com_github_kr328_clash_core_bridge_Bridge_nativeStartVkTurnInstance(JNIEnv *env, jobject thiz,
+                                                                      jstring endpoint, jstring args, jstring token) {
+    TRACE_METHOD();
+    scoped_string _endpoint = get_string(endpoint);
+    scoped_string _args = get_string(args);
+    scoped_string _token = get_string(token);
+    scoped_string error = startVkTurnInstance(_endpoint, _args, _token);
+    return error == NULL ? NULL : new_string(error);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_github_kr328_clash_core_bridge_Bridge_nativeStopVkTurnInstance(JNIEnv *env, jobject thiz,
+                                                                     jstring endpoint) {
+    TRACE_METHOD();
+    scoped_string _endpoint = get_string(endpoint);
+    scoped_string error = stopVkTurnInstance(_endpoint);
+    return error == NULL ? NULL : new_string(error);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_github_kr328_clash_core_bridge_Bridge_nativeReconnectVkTurnInstance(JNIEnv *env, jobject thiz,
+                                                                          jstring endpoint) {
+    TRACE_METHOD();
+    scoped_string _endpoint = get_string(endpoint);
+    return reconnectVkTurnInstance(_endpoint) != 0;
+}
+
+JNIEXPORT void JNICALL
+Java_com_github_kr328_clash_core_bridge_Bridge_nativeCancelVkTurnExcept(JNIEnv *env, jobject thiz,
+                                                                     jstring endpoint) {
+    TRACE_METHOD();
+    scoped_string _endpoint = get_string(endpoint);
+    cancelVkTurnExcept(_endpoint);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_github_kr328_clash_core_bridge_Bridge_nativeQueryVkTurnStates(JNIEnv *env, jobject thiz) {
+    TRACE_METHOD();
+    scoped_string states = queryVkTurnStates();
+    return new_string(states);
+}
+
+JNIEXPORT void JNICALL
+Java_com_github_kr328_clash_core_bridge_Bridge_nativeSubscribeHealthChecks(JNIEnv *env, jobject thiz,
+                                                                        jobject callback) {
+    TRACE_METHOD();
+    subscribeHealthChecks(new_global(callback));
+}
+
+JNIEXPORT jstring JNICALL
 Java_com_github_kr328_clash_core_bridge_Bridge_nativeResolveVkTurnHost(JNIEnv *env, jobject thiz,
                                                                        jstring host) {
     TRACE_METHOD();
@@ -231,6 +281,13 @@ Java_com_github_kr328_clash_core_bridge_Bridge_nativeWakeVkTurn(JNIEnv *env, job
     TRACE_METHOD();
 
     wakeVkTurn();
+}
+
+JNIEXPORT void JNICALL
+Java_com_github_kr328_clash_core_bridge_Bridge_nativeReconnectVkTurn(JNIEnv *env, jobject thiz) {
+    TRACE_METHOD();
+
+    reconnectVkTurn();
 }
 
 JNIEXPORT jboolean JNICALL

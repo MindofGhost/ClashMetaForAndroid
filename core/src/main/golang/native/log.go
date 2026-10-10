@@ -4,6 +4,8 @@ package main
 import "C"
 
 import (
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unsafe"
@@ -15,6 +17,38 @@ type message struct {
 	Level   string `json:"level"`
 	Message string `json:"message"`
 	Time    int64  `json:"time"`
+}
+
+var endpointHealthLog = regexp.MustCompile(`^Health Checked, proxy: (.*), url: .*, alive: (true|false), delay: ([0-9]+) ms uid: \{([^}]+)\}$`)
+var finishedHealthLog = regexp.MustCompile(`^Finish A Health Checking \{([^}]+)\}$`)
+
+//export subscribeHealthChecks
+func subscribeHealthChecks(remote unsafe.Pointer) {
+	sub := log.Subscribe()
+	go func() {
+		defer log.UnSubscribe(sub)
+		defer C.release_object(remote)
+		for msg := range sub {
+			event := struct {
+				Round    string `json:"round"`
+				Endpoint string `json:"endpoint"`
+				Alive    bool   `json:"alive"`
+				Finished bool   `json:"finished"`
+				Time     int64  `json:"time"`
+			}{Time: time.Now().UnixMilli()}
+			if match := endpointHealthLog.FindStringSubmatch(msg.Payload); match != nil {
+				delay, _ := strconv.Atoi(match[3])
+				event.Endpoint, event.Alive, event.Round = match[1], match[2] == "true" && delay > 0 && delay < 0xffff, match[4]
+			} else if match := finishedHealthLog.FindStringSubmatch(msg.Payload); match != nil {
+				event.Round, event.Finished = match[1], true
+			} else {
+				continue
+			}
+			if C.logcat_received(remote, marshalJson(event)) != 0 {
+				return
+			}
+		}
+	}()
 }
 
 func init() {

@@ -7,6 +7,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -116,8 +117,33 @@ object Clash {
         Bridge.nativeStartVkTurn(quoteCommandLine(args))
     }
 
-    fun readVkTurnConfig(path: String): String? {
-        return Bridge.nativeReadVkTurnConfig(path)
+    fun readBypassConfig(path: String): List<BypassConfig>? {
+        val json = Bridge.nativeReadVkTurnConfig(path) ?: return null
+        return Json.decodeFromString(ListSerializer(BypassConfig.serializer()), json)
+    }
+
+    fun startVkTurn(endpoint: String, args: List<String>, token: String) {
+        Bridge.nativeStartVkTurnInstance(endpoint, quoteCommandLine(args), token)?.let {
+            throw IllegalStateException(it)
+        }
+    }
+
+    fun stopVkTurn(endpoint: String) {
+        Bridge.nativeStopVkTurnInstance(endpoint)?.let { throw IllegalStateException(it) }
+    }
+
+    fun reconnectVkTurn(endpoint: String): Boolean {
+        return Bridge.nativeReconnectVkTurnInstance(endpoint)
+    }
+
+    fun cancelVkTurnExcept(endpoint: String) {
+        Bridge.nativeCancelVkTurnExcept(endpoint)
+    }
+
+    fun queryVkTurnStates(): Map<String, String> {
+        return Json.decodeFromString(
+            MapSerializer(String.serializer(), String.serializer()), Bridge.nativeQueryVkTurnStates()
+        )
     }
 
     fun resolveVkTurnHost(host: String): List<String> {
@@ -127,11 +153,11 @@ object Clash {
             .orEmpty()
     }
 
-    fun subscribeVkTurnEvents(): ReceiveChannel<String> {
-        return Channel<String>(Channel.UNLIMITED).apply {
+    fun subscribeVkTurnEvents(): ReceiveChannel<VkTurnEvent> {
+        return Channel<VkTurnEvent>(Channel.UNLIMITED).apply {
             Bridge.nativeSubscribeVkTurnEvents(object : LogcatInterface {
                 override fun received(jsonPayload: String) {
-                    trySend(jsonPayload)
+                    trySend(Json.decodeFromString(VkTurnEvent.serializer(), jsonPayload))
                 }
             })
         }
@@ -143,6 +169,10 @@ object Clash {
 
     fun wakeVkTurn() {
         Bridge.nativeWakeVkTurn()
+    }
+
+    fun reconnectVkTurn() {
+        Bridge.nativeReconnectVkTurn()
     }
 
     fun isVkTurnRunning(): Boolean {
@@ -278,6 +308,16 @@ object Clash {
             Bridge.nativeSubscribeLogcat(object : LogcatInterface {
                 override fun received(jsonPayload: String) {
                     trySend(Json.decodeFromString(LogMessage.serializer(), jsonPayload))
+                }
+            })
+        }
+    }
+
+    fun subscribeHealthCheckEvents(): ReceiveChannel<CoreHealthCheck> {
+        return Channel<CoreHealthCheck>(Channel.UNLIMITED).apply {
+            Bridge.nativeSubscribeHealthChecks(object : LogcatInterface {
+                override fun received(jsonPayload: String) {
+                    trySend(Json.decodeFromString(CoreHealthCheck.serializer(), jsonPayload)).getOrThrow()
                 }
             })
         }

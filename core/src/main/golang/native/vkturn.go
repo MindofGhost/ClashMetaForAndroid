@@ -5,6 +5,8 @@ import "C"
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	stdlog "log"
 	"os"
@@ -27,37 +29,41 @@ var vkTurnEvents = struct {
 	callbacks []unsafe.Pointer
 }{}
 
-type freeTurnEventSink struct{}
+type freeTurnEventSink struct {
+	endpoint string
+	token    string
+}
 
 type freeTurnProtector struct{}
 
-func (freeTurnEventSink) OnState(state string, streams, total int, errMsg string) {
-	if errMsg != "" {
-		line := fmt.Sprintf("[State] %s streams=%d/%d error=%s", state, streams, total, errMsg)
-		notifyVkTurnEvent(line)
-		log.Infoln("[VK_TURN] %s", line)
-		return
-	}
+type freeTurnEvent struct {
+	Endpoint string  `json:"endpoint"`
+	Token    string  `json:"token"`
+	Message  string  `json:"message"`
+	Captcha  *string `json:"captcha,omitempty"`
+}
+
+func (s freeTurnEventSink) emit(line string) {
+	notifyTurnEvent(freeTurnEvent{Endpoint: s.endpoint, Token: s.token, Message: line})
+	log.Infoln("[VK_TURN] [endpoint=%s] %s", s.endpoint, line)
+}
+
+func (s freeTurnEventSink) OnState(state string, streams, total int, errMsg string) {
 	line := fmt.Sprintf("[State] %s streams=%d/%d", state, streams, total)
-	notifyVkTurnEvent(line)
-	log.Infoln("[VK_TURN] %s", line)
+	if errMsg != "" {
+		line += " error=" + errMsg
+	}
+	s.emit(line)
 }
 
-func (freeTurnEventSink) OnLog(level, msg string, unixMillis int64) {
+func (s freeTurnEventSink) OnLog(level, msg string, unixMillis int64) {
 	if msg != "" {
-		notifyVkTurnEvent(msg)
-		log.Infoln("[VK_TURN] [%s] %s", strings.ToUpper(level), msg)
+		s.emit(fmt.Sprintf("[%s] %s", strings.ToUpper(level), msg))
 	}
 }
 
-func (freeTurnEventSink) OnCaptcha(url string) {
-	if strings.TrimSpace(url) == "" {
-		notifyVkTurnEvent("[Captcha] Manual captcha closed")
-		return
-	}
-	notifyVkTurnEvent("[Captcha] Triggering manual captcha fallback...")
-	notifyVkTurnEvent("ACTION REQUIRED: MANUAL CAPTCHA SOLVING NEEDED")
-	notifyVkTurnEvent("CAPTCHA_URL: " + url)
+func (s freeTurnEventSink) OnCaptcha(url string) {
+	notifyTurnEvent(freeTurnEvent{Endpoint: s.endpoint, Token: s.token, Captcha: &url})
 }
 
 func (freeTurnProtector) Protect(fd int) bool {
@@ -77,36 +83,25 @@ func (vkTurnLogWriter) Write(p []byte) (int, error) {
 }
 
 func notifyVkTurnEvent(line string) {
-	vkTurnEvents.Lock()
-	callbacks := append([]unsafe.Pointer(nil), vkTurnEvents.callbacks...)
-	vkTurnEvents.Unlock()
+	notifyTurnEvent(freeTurnEvent{Message: line})
+}
 
-	if len(callbacks) == 0 {
+func notifyTurnEvent(event freeTurnEvent) {
+	payload, err := json.Marshal(event)
+	if err != nil {
 		return
 	}
-
-	var closed []unsafe.Pointer
-	for _, callback := range callbacks {
-		if C.logcat_received(callback, C.CString(line)) != 0 {
-			closed = append(closed, callback)
-		}
-	}
-
-	if len(closed) == 0 {
-		return
-	}
-
 	vkTurnEvents.Lock()
-	for _, callback := range closed {
-		for i, existing := range vkTurnEvents.callbacks {
-			if existing == callback {
-				vkTurnEvents.callbacks = append(vkTurnEvents.callbacks[:i], vkTurnEvents.callbacks[i+1:]...)
-				C.release_object(callback)
-				break
-			}
+	defer vkTurnEvents.Unlock()
+	alive := vkTurnEvents.callbacks[:0]
+	for _, callback := range vkTurnEvents.callbacks {
+		if C.logcat_received(callback, C.CString(string(payload))) != 0 {
+			C.release_object(callback)
+		} else {
+			alive = append(alive, callback)
 		}
 	}
-	vkTurnEvents.Unlock()
+	vkTurnEvents.callbacks = alive
 }
 
 func init() {
@@ -174,15 +169,12 @@ func readVkTurnConfig(path C.c_string) *C.char {
 		log.Warnln("[VK_TURN] failed to read profile: %s", err.Error())
 		return nil
 	}
-	commandLine, err := config.ParseTurnBypassConfig(data)
+	entries, err := config.ParseBypassConfig(data)
 	if err != nil {
 		log.Warnln("[VK_TURN] invalid bypass configuration: %s", err.Error())
 		return nil
 	}
-	if commandLine == "" {
-		return nil
-	}
-	return C.CString(commandLine)
+	return marshalJson(entries)
 }
 
 //export startVkTurn
@@ -226,20 +218,168 @@ func resolveVkTurnHost(host C.c_string) *C.char {
 
 //export stopVkTurn
 func stopVkTurn() {
+	cancelTurnExcept("")
+	for endpoint := range turnInstancesSnapshot() {
+		if err := stopTurnInstance(endpoint); err != nil {
+			log.Warnln("[VK_TURN] stop %s failed: %v", endpoint, err)
+		}
+	}
 	freeturn.Stop()
 }
 
 //export wakeVkTurn
 func wakeVkTurn() {
+	for _, instance := range turnInstancesSnapshot() {
+		instance.proxy.Wake()
+	}
 	freeturn.Wake()
+}
+
+//export reconnectVkTurn
+func reconnectVkTurn() {
+	for _, instance := range turnInstancesSnapshot() {
+		instance.proxy.Reconnect()
+	}
+	freeturn.Reconnect()
 }
 
 //export isVkTurnRunning
 func isVkTurnRunning() C.int {
+	for _, instance := range turnInstancesSnapshot() {
+		if turnStateRunning(instance.proxy.GetState()) {
+			return 1
+		}
+	}
 	state := freeturn.GetState()
 	if state == nil || state.State == freeturn.StateIdle || state.State == freeturn.StateError {
 		return 0
 	}
 
 	return 1
+}
+
+type turnInstance struct {
+	proxy  *freeturn.ProxyInstance
+	listen string
+	mode   bool
+}
+
+var turnInstances = struct {
+	sync.Mutex
+	entries map[string]*turnInstance
+}{entries: make(map[string]*turnInstance)}
+
+func turnInstancesSnapshot() map[string]*turnInstance {
+	turnInstances.Lock()
+	defer turnInstances.Unlock()
+	result := make(map[string]*turnInstance, len(turnInstances.entries))
+	for endpoint, instance := range turnInstances.entries {
+		result[endpoint] = instance
+	}
+	return result
+}
+
+func turnStateRunning(state *freeturn.Snapshot) bool {
+	return state != nil && state.State != freeturn.StateIdle && state.State != freeturn.StateError
+}
+
+func startTurnInstance(endpoint, commandLine, token string) error {
+	args, err := parseCommandLine(commandLine)
+	if err != nil {
+		return err
+	}
+	legacy, err := parseFreeTurnLegacyConfig(args)
+	if err != nil {
+		return err
+	}
+	configJSON, err := freeTurnConfigJSONFromLegacyArgs(args, app.Hwid())
+	if err != nil {
+		return err
+	}
+	turnInstances.Lock()
+	defer turnInstances.Unlock()
+	if old := turnInstances.entries[endpoint]; old != nil {
+		if err := old.proxy.Stop(); err != nil {
+			return err
+		}
+		delete(turnInstances.entries, endpoint)
+	}
+	for other, instance := range turnInstances.entries {
+		if instance.listen == legacy.Listen && instance.mode == legacy.VLESSMode {
+			return fmt.Errorf("listen address %s is already used by %s", legacy.Listen, other)
+		}
+	}
+	cacheDir := strings.TrimSpace(app.CacheDir())
+	if cacheDir == "" {
+		return fmt.Errorf("app cache directory is absent")
+	}
+	hash := sha256.Sum256([]byte(endpoint))
+	stateDir := filepath.Join(cacheDir, "freeturn", fmt.Sprintf("%x", hash[:16]))
+	instance := freeturn.NewProxyInstance(stateDir, freeTurnEventSink{endpoint: endpoint, token: token})
+	if err := instance.Start(configJSON); err != nil {
+		return err
+	}
+	turnInstances.entries[endpoint] = &turnInstance{proxy: instance, listen: legacy.Listen, mode: legacy.VLESSMode}
+	log.Infoln("[VK_TURN] started endpoint=%s listen=%s", endpoint, legacy.Listen)
+	return nil
+}
+
+func stopTurnInstance(endpoint string) error {
+	turnInstances.Lock()
+	defer turnInstances.Unlock()
+	instance := turnInstances.entries[endpoint]
+	if instance == nil {
+		return nil
+	}
+	if err := instance.proxy.Stop(); err != nil {
+		return err
+	}
+	delete(turnInstances.entries, endpoint)
+	return nil
+}
+
+//export startVkTurnInstance
+func startVkTurnInstance(endpoint, args, token C.c_string) *C.char {
+	if err := startTurnInstance(C.GoString(endpoint), C.GoString(args), C.GoString(token)); err != nil {
+		return C.CString(err.Error())
+	}
+	return nil
+}
+
+//export stopVkTurnInstance
+func stopVkTurnInstance(endpoint C.c_string) *C.char {
+	if err := stopTurnInstance(C.GoString(endpoint)); err != nil {
+		return C.CString(err.Error())
+	}
+	return nil
+}
+
+//export reconnectVkTurnInstance
+func reconnectVkTurnInstance(endpoint C.c_string) C.int {
+	if instance := turnInstancesSnapshot()[C.GoString(endpoint)]; instance != nil && instance.proxy.Reconnect() {
+		return 1
+	}
+	return 0
+}
+
+//export cancelVkTurnExcept
+func cancelVkTurnExcept(endpoint C.c_string) {
+	cancelTurnExcept(C.GoString(endpoint))
+}
+
+func cancelTurnExcept(endpoint string) {
+	for name, instance := range turnInstancesSnapshot() {
+		if name != endpoint {
+			instance.proxy.Cancel()
+		}
+	}
+}
+
+//export queryVkTurnStates
+func queryVkTurnStates() *C.char {
+	states := make(map[string]string)
+	for endpoint, instance := range turnInstancesSnapshot() {
+		states[endpoint] = instance.proxy.GetState().State
+	}
+	return marshalJson(states)
 }
