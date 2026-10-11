@@ -8,7 +8,7 @@
 #include "jni_helper.h"
 #include "trace.h"
 
-#include "version.h" // 添加当前编译core版本号变量
+#include <version.h>
 
 
 JNIEXPORT void JNICALL

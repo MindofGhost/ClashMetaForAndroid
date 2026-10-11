@@ -1,46 +1,51 @@
 cmake_minimum_required(VERSION 3.0)
 
-# 获取git hash
-
-message(STATUS "CMAKE_CURRENT_SOURCE_DIR= ${CMAKE_CURRENT_SOURCE_DIR}")
+set(CORE_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/../../foss/golang/clash")
 execute_process(
-  COMMAND git submodule foreach git log -1 --format=%H   
-  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} 
+  COMMAND git -C "${CORE_SOURCE}" rev-parse --short=7 HEAD
   OUTPUT_VARIABLE COMMIT_HASH
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  RESULT_VARIABLE CORE_GIT_RESULT
 )
-string(REPLACE "\n" ";" COMMIT_HASH "${COMMIT_HASH}")
-list(GET COMMIT_HASH 1 COMMIT_HASH)
-string (REGEX REPLACE "[\n\t\r]" "" COMMIT_HASH ${COMMIT_HASH})
-string(SUBSTRING ${COMMIT_HASH} 0 7 COMMIT_HASH)
-message(STATUS "git hash= ${COMMIT_HASH}")
-
-# 获取分支名称
+if(NOT CORE_GIT_RESULT EQUAL 0)
+  message(FATAL_ERROR "Cannot determine the Clash core commit")
+endif()
 execute_process(
-  COMMAND git submodule foreach git branch -r --contains ${COMMIT_HASH}
-  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} 
-  OUTPUT_VARIABLE CURRENT_BRANCH
+  COMMAND git -C "${CORE_SOURCE}" describe --tags --always HEAD
+  OUTPUT_VARIABLE CORE_VERSION
+  OUTPUT_STRIP_TRAILING_WHITESPACE
 )
-string(REPLACE "\n" ";" CURRENT_BRANCH "${CURRENT_BRANCH}")
-list(GET CURRENT_BRANCH 1 CURRENT_BRANCH)
-string (REGEX REPLACE "origin/" "" CURRENT_BRANCH ${CURRENT_BRANCH})
-string (REGEX REPLACE "[\n\t\r]" "" CURRENT_BRANCH ${CURRENT_BRANCH})
-#string(SUBSTRING ${CURRENT_BRANCH} 0 8 CURRENT_BRANCH)
-message(STATUS "git current branch = ${CURRENT_BRANCH}")
+string(REPLACE "_" "-" CORE_VERSION "${CORE_VERSION}")
 
-# 获取生成时间
+# Reconfigure when the core changes, even if C/C++ sources are unchanged.
+execute_process(
+  COMMAND git -C "${CORE_SOURCE}" rev-parse --absolute-git-dir
+  OUTPUT_VARIABLE CORE_GIT_DIR
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CORE_GIT_DIR}/HEAD")
+if(EXISTS "${CORE_GIT_DIR}/packed-refs")
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CORE_GIT_DIR}/packed-refs")
+endif()
+execute_process(
+  COMMAND git -C "${CORE_SOURCE}" symbolic-ref --quiet HEAD
+  OUTPUT_VARIABLE CORE_GIT_REF
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+if(CORE_GIT_REF)
+  execute_process(
+    COMMAND git -C "${CORE_SOURCE}" rev-parse --git-path "${CORE_GIT_REF}"
+    OUTPUT_VARIABLE CORE_REF_PATH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+  get_filename_component(CORE_REF_PATH "${CORE_REF_PATH}" ABSOLUTE BASE_DIR "${CORE_SOURCE}")
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CORE_REF_PATH}")
+endif()
+
 string(TIMESTAMP COMPILE_TIME "%y%m%d")
-string (REGEX REPLACE "[\n\t\r]" "" COMPILE_TIME ${COMPILE_TIME})
-string(REGEX REPLACE "\"" "" COMPILE_TIME ${COMPILE_TIME})
-
-# 生成版本信息
-set(GIT_VERSION "${CURRENT_BRANCH}_${COMMIT_HASH}_${COMPILE_TIME}")
+set(GIT_VERSION "${CORE_VERSION}_${COMMIT_HASH}_${COMPILE_TIME}")
 message(STATUS "version info = ${GIT_VERSION}")
-
-# 去除空格
-string(REGEX REPLACE "[ ]+" "" GIT_VERSION "${GIT_VERSION}")
-
-# 保存变量到文件
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/version.h.in ${CMAKE_CURRENT_SOURCE_DIR}/version.h @ONLY)
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/version.h.in" "${CMAKE_CURRENT_BINARY_DIR}/version.h" @ONLY)
 
 project(clash-bridge C)
 
@@ -60,6 +65,7 @@ else ()
     message(FATAL_ERROR "Unknown build type ${CMAKE_BUILD_TYPE}")
 endif ()
 
+include_directories(BEFORE "${CMAKE_CURRENT_BINARY_DIR}")
 include_directories("${GO_OUTPUT_BASE}/${CMAKE_ANDROID_ARCH_ABI}")
 include_directories("${GO_SOURCE}")
 
