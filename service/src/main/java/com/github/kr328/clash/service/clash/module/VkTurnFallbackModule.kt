@@ -66,6 +66,7 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
     private class TurnRuntime(val config: BypassConfig, val args: List<String>) {
         var pendingStart: Job? = null
         var waitingForHealthCheck = false
+        var startupChecksPassed = false
         var expected = false
         var token = ""
         var startedAt = 0L
@@ -292,10 +293,11 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         for (runtime in instances.values) {
             if (runtime.expected || runtime.waitingForHealthCheck || runtime.pendingStart?.isActive == true) continue
             val scope = moduleScope ?: return
+            val checkRequired = !runtime.startupChecksPassed
             runtime.pendingStart = scope.launch {
                 val job = coroutineContext[Job]
                 try {
-                    val conditionsMet = service.checkBypassConditions(runtime.config.check) { domain, result, expected ->
+                    val conditionsMet = !checkRequired || service.checkBypassConditions(runtime.config.check) { domain, result, expected ->
                         logInfo("VK TURN startup check endpoint=${runtime.config.endpoint} domain=$domain result=$result expected=$expected")
                     }
                     if (!conditionsMet) {
@@ -327,6 +329,7 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
                                 Clash.startVkTurn(runtime.config.endpoint, runtime.args, runtime.token)
                             }
                         }.onSuccess {
+                            runtime.startupChecksPassed = true
                             runtime.expected = true
                             logInfo("VK TURN started endpoint=${runtime.config.endpoint}")
                         }.onFailure {
@@ -368,6 +371,7 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
 
     private suspend fun stopInstance(runtime: TurnRuntime, reason: String) {
         cancelPendingStart(runtime)
+        runtime.startupChecksPassed = false
         if (!runtime.expected) return
         runCatching {
             withContext(Dispatchers.IO) { Clash.stopVkTurn(runtime.config.endpoint) }
@@ -400,7 +404,7 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
         cancelRecoveryStop()
         failedChecks = 0
         recoveredChecks = 0
-        if (instances.values.none { it.expected }) startConfirmed = false
+        if (instances.values.none { it.startupChecksPassed }) startConfirmed = false
         lastAvailableEndpointCount = null
         completedChecks.clear()
         roundEndpoints.clear()

@@ -33,6 +33,7 @@ suspend fun Context.fetchSubscriptionHeaders(source: String): SubscriptionHeader
         return null
 
     val client = OkHttpClient.Builder()
+        .retryOnConnectionFailure(false)
         .callTimeout(20, TimeUnit.SECONDS)
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
@@ -44,11 +45,10 @@ suspend fun Context.fetchSubscriptionHeaders(source: String): SubscriptionHeader
         .header("x-hwid", hwid)
         .build()
 
-    client.newCall(request).execute().use { response ->
-        if (!response.isSuccessful)
-            return null
-
-        return parseSubscriptionHeaders(response.headers)
+    return withAppMetadataRouteRetry("subscription headers", client) { routedClient ->
+        routedClient.newCall(request).awaitMetadataResponse().use { response ->
+            if (response.isSuccessful) parseSubscriptionHeaders(response.headers) else null
+        }
     }
 }
 

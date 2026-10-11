@@ -87,6 +87,9 @@ This replaces the previous VK-link DNS precheck; it does not replace ordinary Cl
 A failed startup check blocks retries for that helper until the next completed ordinary health-check
 round. The watchdog and individual helper results cannot retry it in between. Another failed ordinary
 round permits a new attempt; ordinary recovery cancels startup as usual.
+After a successful start, startup checks are not repeated for reconnects or recovery of an
+unexpectedly stopped instance. Authorization and confirmed fallback state survive network changes
+and recovery; explicit helper shutdown clears its authorization, so its next activation checks again.
 
 A candidate wins only after its endpoint passes a core health check and is selected by a top-level
 group (following nested selections). Other candidates are cancelled and stopped. Ties retain an
@@ -95,6 +98,14 @@ helper requests its reconnect only after the first-stream warm-up barrier comple
 successful connection or the existing 20-second timeout). Every UDP reconnect re-arms this
 barrier. Candidates waiting for manual captcha are left to finish.
 Credentials and personas are cached separately per endpoint under the app cache directory.
+
+### App Updates
+
+Subscription-header requests and APK availability checks first use the normal system route,
+without socket protection or physical-network binding. After a network error or unsuccessful
+HTTP response, they retry once through a physical network with its DNS and no system HTTP proxy.
+The retry uses fresh connections and is cancelled along with the original operation.
+APK downloads retain their separate direct-first retry policy.
 
 ### Automation
 

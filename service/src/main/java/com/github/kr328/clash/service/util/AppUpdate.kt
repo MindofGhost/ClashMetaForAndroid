@@ -35,15 +35,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import okhttp3.Credentials
-import okhttp3.Dns
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.io.IOException
-import java.net.InetAddress
-import java.net.Proxy
 import java.security.MessageDigest
 import java.util.Locale
 import java.util.concurrent.TimeUnit
@@ -263,12 +260,14 @@ fun Context.clearAppUpdateCacheIfPackageChanged() {
     store.appUpdateLastPackageUpdate = lastPackageUpdate
 }
 
-private fun Context.resolveAvailableAppUpdateUrl(source: String, template: String): String? {
+private suspend fun Context.resolveAvailableAppUpdateUrl(source: String, template: String): String? {
     val abis = Build.SUPPORTED_ABIS.takeIf { it.isNotEmpty() } ?: return null
 
-    return abis.asSequence()
-        .mapNotNull { abi -> resolveAppUpdateUrl(source, template.replace("{{abi}}", abi)) }
-        .firstOrNull { isAppUpdateUrlAvailable(it) }
+    for (abi in abis) {
+        val url = resolveAppUpdateUrl(source, template.replace("{{abi}}", abi)) ?: continue
+        if (isAppUpdateUrlAvailable(url)) return url
+    }
+    return null
 }
 
 private fun Context.resolveAppUpdateUrl(source: String, value: String): String? {
@@ -289,21 +288,13 @@ private fun Context.resolveAppUpdateUrl(source: String, value: String): String? 
         .toString()
 }
 
-private fun isAppUpdateUrlAvailable(url: String): Boolean {
+private suspend fun Context.isAppUpdateUrlAvailable(url: String): Boolean {
     val client = appUpdateClient()
     val head = Request.Builder()
         .url(url)
         .head()
         .withUrlBasicAuth()
         .build()
-
-    client.newCall(head).execute().use { response ->
-        if (response.code == 200)
-            return true
-
-        if (response.code != 405)
-            return false
-    }
 
     val ranged = Request.Builder()
         .url(url)
@@ -312,9 +303,15 @@ private fun isAppUpdateUrlAvailable(url: String): Boolean {
         .withUrlBasicAuth()
         .build()
 
-    client.newCall(ranged).execute().use { response ->
-        return response.code == 200 || response.code == 206
-    }
+    return withAppMetadataRouteRetry("APK availability", client) { routedClient ->
+        routedClient.newCall(head).awaitMetadataResponse().use { response ->
+            if (response.code == 200) return@withAppMetadataRouteRetry true
+            if (response.code != 405) return@withAppMetadataRouteRetry null
+        }
+        routedClient.newCall(ranged).awaitMetadataResponse().use { response ->
+            if (response.code == 200 || response.code == 206) true else null
+        }
+    } == true
 }
 
 private fun Context.showAppUpdateNotification(url: String, expectedCert: String) {
@@ -478,6 +475,7 @@ private fun signingCertificateSha256(info: PackageInfo): Set<String> {
 
 private fun appUpdateClient(): OkHttpClient {
     return OkHttpClient.Builder()
+        .retryOnConnectionFailure(false)
         .callTimeout(30, TimeUnit.SECONDS)
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
@@ -486,7 +484,7 @@ private fun appUpdateClient(): OkHttpClient {
         .build()
 }
 
-private fun Context.appUpdateDirectNetwork(): Network? {
+internal fun Context.appUpdateDirectNetwork(): Network? {
     val connectivity = getSystemService<ConnectivityManager>() ?: return null
     return try {
         connectivity.allNetworks.mapNotNull { network ->
@@ -504,7 +502,7 @@ private fun Context.appUpdateDirectNetwork(): Network? {
             network to priority
         }.minByOrNull { it.second }?.first
     } catch (e: SecurityException) {
-        Log.w("App update direct network unavailable; using default route")
+        Log.w("App update direct network unavailable")
         null
     }
 }
@@ -518,11 +516,7 @@ private fun appUpdateDownloadClient(network: Network?): OkHttpClient {
         .followSslRedirects(true)
     if (network != null) {
         // DNS and sockets must use the same physical network, not the VPN's fake-IP DNS.
-        builder.socketFactory(network.socketFactory)
-            .dns(object : Dns {
-                override fun lookup(hostname: String): List<InetAddress> = network.getAllByName(hostname).toList()
-            })
-            .proxy(Proxy.NO_PROXY)
+        builder.useDirectNetwork(network)
     }
     return builder.build()
 }
