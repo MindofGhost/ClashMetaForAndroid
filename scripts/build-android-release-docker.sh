@@ -179,7 +179,15 @@ elif [[ "$system_go_version" != "go${GO_VERSION}" ]]; then
 else
   export PATH="/usr/local/go/bin:$PATH"
 fi
-git config --global --add safe.directory /workspace
+# Trust only the mounted project and its embedded repositories.
+for repo in \
+  /workspace \
+  /workspace/core/src/foss/golang/clash \
+  /workspace/core/src/foss/golang/free-turn-proxy \
+  /workspace/core/src/main/golang/native/vkturn
+do
+  git config --global --add safe.directory "$repo"
+done
 
 if [[ -f /tmp/signing.properties ]]; then
   cp /tmp/signing.properties /workspace/signing.properties
