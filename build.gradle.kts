@@ -28,7 +28,7 @@ subprojects {
     }
 
     val isApp = name == "app"
-    val baseVersionName = "2.11.34"
+    val baseVersionName = "2.11.35"
     val customVersionName = System.getenv("RELEASE_TAG")
         ?.removePrefix("v")
         ?.takeIf { it.startsWith("$baseVersionName-") }
@@ -66,7 +66,7 @@ subprojects {
             targetSdk = 35
 
             versionName = customVersionName ?: baseVersionName
-            versionCode = customVersionCode ?: 211034
+            versionCode = customVersionCode ?: 211035
 
             resValue("string", "release_name", "v$versionName")
             resValue("integer", "release_code", "$versionCode")
