@@ -292,7 +292,7 @@ func startTurnInstance(endpoint, commandLine, token string) error {
 	if err != nil {
 		return err
 	}
-	configJSON, err := freeTurnConfigJSONFromLegacyArgs(args, app.Hwid())
+	configJSON, err := freeTurnConfigJSONFromLegacyArgs(args, app.Hwid()+"|"+endpoint)
 	if err != nil {
 		return err
 	}
