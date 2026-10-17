@@ -31,6 +31,11 @@ gradle-app.setting
 # Ignore builtin geofiles
 app/src/main/assets
 
+# Public CA bundles are downloaded before building
+/service/src/main/res/raw/browser_ca.pem
+/service/src/main/res/raw/.ca-update.*/
+/core/src/foss/golang/clash/component/ca/ca-certificates.crt
+
 # KeyStore
 signing.properties
 local-signing/

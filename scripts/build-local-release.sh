@@ -6,6 +6,13 @@ ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 SIGNING_PROPERTIES="${SIGNING_PROPERTIES:-$ROOT_DIR/local-signing/signing.properties}"
 GENERATE_SIGNING_KEY="${GENERATE_SIGNING_KEY:-false}"
 
+if [ "${UPDATE_CA_CERTIFICATES:-true}" = "true" ]; then
+  sh "$ROOT_DIR/scripts/update-ca-certificates.sh"
+elif [ ! -s "$ROOT_DIR/service/src/main/res/raw/browser_ca.pem" ]; then
+  echo "No cached CA bundle; run sh scripts/update-ca-certificates.sh before an offline build" >&2
+  exit 1
+fi
+
 BRANCH_NAME="${BRANCH_NAME:-$(git -C "$ROOT_DIR" branch --show-current 2>/dev/null || true)}"
 if [ -z "$BRANCH_NAME" ]; then
   BRANCH_NAME="$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo local)"

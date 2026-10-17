@@ -243,6 +243,11 @@ if [[ "$REMOVE_SUFFIX" == "true" ]]; then
 fi
 
 go version
+if [[ ! -s /workspace/service/src/main/res/raw/browser_ca.pem ]]; then
+  sh /workspace/scripts/update-ca-certificates.sh
+fi
+cp -f /workspace/service/src/main/res/raw/browser_ca.pem \
+  /workspace/core/src/foss/golang/clash/component/ca/ca-certificates.crt
 (cd /workspace/core/src/main/golang && go mod tidy -diff)
 (cd /workspace/core/src/foss/golang && go mod tidy -diff)
 

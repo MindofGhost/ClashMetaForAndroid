@@ -33,6 +33,7 @@ suspend fun Context.fetchSubscriptionHeaders(source: String): SubscriptionHeader
         return null
 
     val client = OkHttpClient.Builder()
+        .withBundledCertificates()
         .retryOnConnectionFailure(false)
         .callTimeout(20, TimeUnit.SECONDS)
         .connectTimeout(10, TimeUnit.SECONDS)

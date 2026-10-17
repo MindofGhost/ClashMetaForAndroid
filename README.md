@@ -101,6 +101,23 @@ Credentials and personas are cached separately per endpoint under the app cache 
 
 ### App Updates
 
+Subscription and app-update HTTPS clients supplement system trust with the Mozilla CA bundle
+published at https://curl.se/ca/cacert.pem (MPL-2.0).
+The same file, `service/src/main/res/raw/browser_ca.pem`, is copied into Mihomo's existing
+embedded CA slot before Go compilation, including local Docker builds.
+PEM downloads and temporary download directories are gitignored. Gradle downloads a missing
+bundle before Go compilation or Android resource processing, so clean checkouts work too.
+Mihomo's generated `component/ca/ca-certificates.crt` is also ignored in its own repository;
+Docker prepares it before Go dependency checks as well as compilation.
+`scripts/build-local-release.sh` refreshes this file over HTTPS before calculating the release tag,
+verifies the published SHA-256 and parses the certificates before atomically replacing the bundle.
+A download or validation failure stops the build and leaves the existing bundle intact.
+For offline builds with an already downloaded bundle, use
+`UPDATE_CA_CERTIFICATES=false ./scripts/build-local-release.sh`.
+Hostname, certificate-chain and validity checks remain enabled; Kotlin clients support this
+bundle on Android 5/6 as well, without relying on Android 7's network-security configuration.
+The bundle's origin and timestamp are recorded in its header: https://curl.se/docs/caextract.html.
+
 Subscription-header requests and APK availability checks first use the normal system route,
 without socket protection or physical-network binding. After a network error or unsuccessful
 HTTP response, they retry once through a physical network with its DNS and no system HTTP proxy.

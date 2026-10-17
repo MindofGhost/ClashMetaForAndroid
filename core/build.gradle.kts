@@ -10,6 +10,23 @@ plugins {
 }
 
 val golangSource = file("src/main/golang/native")
+val browserCaBundle = rootProject.file("service/src/main/res/raw/browser_ca.pem")
+val downloadCaBundle by tasks.registering(Exec::class) {
+    commandLine("sh", rootProject.file("scripts/update-ca-certificates.sh"))
+    outputs.file(browserCaBundle)
+    onlyIf { !browserCaBundle.isFile || browserCaBundle.length() == 0L }
+    doFirst {
+        check(!gradle.startParameter.isOffline) {
+            "No cached CA bundle; run sh scripts/update-ca-certificates.sh before an offline build"
+        }
+    }
+}
+val prepareCaBundle by tasks.registering(Copy::class) {
+    dependsOn(downloadCaBundle)
+    from(browserCaBundle)
+    into(file("src/foss/golang/clash/component/ca"))
+    rename { "ca-certificates.crt" }
+}
 
 golang {
     sourceSets {
@@ -58,6 +75,8 @@ dependencies {
 
 afterEvaluate {
     tasks.withType(GolangBuildTask::class.java).forEach {
+        it.dependsOn(prepareCaBundle)
+        it.inputs.file(browserCaBundle)
         it.inputs.dir(golangSource)
         it.doFirst {
             val args = it.commandLine.map { arg -> arg.toString() }.toMutableList()

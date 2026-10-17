@@ -32,3 +32,7 @@ afterEvaluate {
         }
     }
 }
+
+tasks.named("preBuild") {
+    dependsOn(":core:downloadCaBundle")
+}

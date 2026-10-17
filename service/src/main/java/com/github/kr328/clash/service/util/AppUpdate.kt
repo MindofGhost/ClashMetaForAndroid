@@ -475,6 +475,7 @@ private fun signingCertificateSha256(info: PackageInfo): Set<String> {
 
 private fun appUpdateClient(): OkHttpClient {
     return OkHttpClient.Builder()
+        .withBundledCertificates()
         .retryOnConnectionFailure(false)
         .callTimeout(30, TimeUnit.SECONDS)
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -509,6 +510,7 @@ internal fun Context.appUpdateDirectNetwork(): Network? {
 
 private fun appUpdateDownloadClient(network: Network?): OkHttpClient {
     val builder = OkHttpClient.Builder()
+        .withBundledCertificates()
         .callTimeout(0, TimeUnit.SECONDS)
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
