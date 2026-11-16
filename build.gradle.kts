@@ -28,7 +28,9 @@ subprojects {
     }
 
     val isApp = name == "app"
-    val baseVersionName = "2.11.35"
+    val baseVersionName = System.getenv("BASE_VERSION_NAME")
+        ?.takeIf { it.matches(Regex("""[0-9]+\.[0-9]+\.[0-9]+""")) }
+        ?: "2.11.37"
     val customVersionName = System.getenv("RELEASE_TAG")
         ?.removePrefix("v")
         ?.takeIf { it.startsWith("$baseVersionName-") }

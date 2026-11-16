@@ -20,11 +20,17 @@ fi
 BRANCH_NAME="$(printf '%s' "$BRANCH_NAME" | sed 's#[^A-Za-z0-9._-]#-#g')"
 
 BASE_TAG="${BASE_TAG:-$(
-  git -C "$ROOT_DIR" tag --merged HEAD --sort=-v:refname 2>/dev/null |
-    sed -n '/^v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*$/ { p; q; }'
+  git -C "$ROOT_DIR" tag --merged HEAD 2>/dev/null |
+    awk '/^v?[0-9]+\.[0-9]+\.[0-9]+$/ {
+      version = $0
+      sub(/^v/, "", version)
+      print version, $0
+    }' |
+    LC_ALL=C sort -k1,1Vr -k2,2r |
+    awk 'NR == 1 { print $2 }'
 )}"
 if [ -z "$BASE_TAG" ]; then
-  echo "No reachable semantic version tag found (expected vMAJOR.MINOR.PATCH)" >&2
+  echo "No reachable semantic version tag found (expected MAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH)" >&2
   exit 1
 fi
 if ! git -C "$ROOT_DIR" rev-parse --verify --quiet "$BASE_TAG^{commit}" >/dev/null; then
@@ -60,7 +66,7 @@ if ! git -C "$ROOT_DIR" diff --quiet --ignore-submodules=dirty 2>/dev/null ||
    ! git -C "$ROOT_DIR" diff --cached --quiet --ignore-submodules=dirty 2>/dev/null; then
   PATCH_ID="$PATCH_ID-dirty"
 fi
-RELEASE_TAG="${RELEASE_TAG:-$BASE_TAG-$BRANCH_NAME-$PATCH_ID}"
+RELEASE_TAG="${RELEASE_TAG:-v$BASE_VERSION_NAME-$BRANCH_NAME-$PATCH_ID}"
 FLAVOR="${FLAVOR:-meta}"
 BUILD_TYPE="${BUILD_TYPE:-Release}"
 
