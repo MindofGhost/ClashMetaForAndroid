@@ -13,7 +13,6 @@ import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -84,21 +83,6 @@ class VkTurnCaptchaActivity : Activity() {
                             requestClose()
                         }
                     }
-                }
-
-                override fun shouldInterceptRequest(
-                    view: WebView?,
-                    request: WebResourceRequest?,
-                ): WebResourceResponse? {
-                    val requestUrl = request?.url
-                    if (requestUrl?.host == "127.0.0.1" &&
-                        requestUrl.path == "/local-captcha-result"
-                    ) {
-                        Log.i("VK TURN captcha result submitted: $requestUrl")
-                        requestClose()
-                    }
-
-                    return super.shouldInterceptRequest(view, request)
                 }
             }
 
@@ -214,14 +198,14 @@ class VkTurnCaptchaActivity : Activity() {
     companion object {
         const val EXTRA_URL = "url"
         const val ACTION_SUBMITTED = "com.github.kr328.clash.action.VK_TURN_CAPTCHA_SUBMITTED"
-        private const val LOCAL_CAPTCHA_HOST = "127.0.0.1"
-        private const val LOCAL_CAPTCHA_ORIGIN = "http://127.0.0.1:8765/"
+        private const val LOCAL_CAPTCHA_HOST = "localhost"
+        private const val LOCAL_CAPTCHA_ORIGIN = "http://localhost:8765/"
         private const val LOCAL_CAPTCHA_ROOT_PATH = "/"
         private const val CLOSE_DELAY = 300L
         private const val CLOSE_TEXT_CHECK_INTERVAL = 1_000L
         private const val MAX_CLOSE_TEXT_CHECKS = 90
         private const val CLOSE_TEXT_SCRIPT =
-            "(() => /can\\s+close|close\\s+this|you\\s+may\\s+close|" +
+            "(() => window.__ftpCaptchaDone === true || /can\\s+close|close\\s+this|you\\s+may\\s+close|" +
                     "\\u043c\\u043e\\u0436\\u043d\\u043e\\s+\\u0437\\u0430\\u043a\\u0440|" +
                     "\\u0437\\u0430\\u043a\\u0440\\u044b\\u0442\\u044c\\s+\\u0441\\u0442\\u0440\\u0430\\u043d/" +
                     ".test((document.body && document.body.innerText || '').toLowerCase()))();"

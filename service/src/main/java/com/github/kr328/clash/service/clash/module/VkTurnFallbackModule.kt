@@ -531,7 +531,7 @@ class VkTurnFallbackModule(service: Service) : Module<Unit>(service) {
             return null
 
         val builder = uri.buildUpon()
-            .encodedAuthority("127.0.0.1:${uri.port.takeIf { it > 0 } ?: CAPTCHA_PORT}")
+            .encodedAuthority("localhost:${uri.port.takeIf { it > 0 } ?: CAPTCHA_PORT}")
             .clearQuery()
 
         uri.queryParameterNames
