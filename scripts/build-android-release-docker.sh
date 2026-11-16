@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 IMAGE="${IMAGE:-ghcr.io/cirruslabs/android-sdk:35}"
 DOCKER_CONTEXT_NAME="${DOCKER_CONTEXT_NAME:-default}"
-GO_VERSION="${GO_VERSION:-1.26.7}"
+GO_VERSION="${GO_VERSION:-1.26.11}"
 GOFLAGS="${GOFLAGS:--ldflags=-checklinkname=0}"
 FLAVOR="${FLAVOR:-alpha}"
 BUILD_TYPE="${BUILD_TYPE:-Release}"

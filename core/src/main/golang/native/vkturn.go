@@ -62,7 +62,11 @@ func (s freeTurnEventSink) OnLog(level, msg string, unixMillis int64) {
 	}
 }
 
-func (s freeTurnEventSink) OnCaptcha(url string) {
+func (s freeTurnEventSink) OnCaptcha(url string, manual bool) {
+	if !manual && url != "" {
+		log.Warnln("[VK_TURN] background captcha browser is not available; keeping automatic solver fallback")
+		return
+	}
 	notifyTurnEvent(freeTurnEvent{Endpoint: s.endpoint, Token: s.token, Captcha: &url})
 }
 
