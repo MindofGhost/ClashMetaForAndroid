@@ -5,6 +5,8 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import androidx.core.content.getSystemService
+import com.github.kr328.clash.common.log.Log
+import com.github.kr328.clash.core.Clash
 import com.github.kr328.clash.core.model.BypassCheck
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.Call
@@ -17,6 +19,7 @@ import okhttp3.Response
 import java.io.IOException
 import java.net.InetAddress
 import java.net.Proxy
+import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 
@@ -29,8 +32,12 @@ internal suspend fun Context.checkBypassConditions(
     val client = OkHttpClient.Builder()
         .socketFactory(network.socketFactory)
         .dns(object : Dns {
-            override fun lookup(hostname: String): List<InetAddress> =
-                network.getAllByName(hostname).toList()
+            override fun lookup(hostname: String): List<InetAddress> {
+                val addresses = Clash.resolveVkTurnHost(hostname)
+                if (addresses.isEmpty())
+                    throw UnknownHostException("Direct DNS lookup failed for $hostname")
+                return addresses.map { InetAddress.getByName(it) }
+            }
         })
         .proxy(Proxy.NO_PROXY)
         .followRedirects(true)
@@ -77,10 +84,12 @@ private suspend fun Call.checkSuccess(): Boolean = suspendCancellableCoroutine {
     continuation.invokeOnCancellation { cancel() }
     enqueue(object : Callback {
         override fun onFailure(call: Call, e: IOException) {
+            Log.i("VK TURN startup request domain=${call.request().url.host} failed (${e.javaClass.simpleName})")
             continuation.resume(false)
         }
 
         override fun onResponse(call: Call, response: Response) {
+            Log.i("VK TURN startup request domain=${response.request.url.host} status=${response.code}")
             val success = response.use { it.isSuccessful }
             continuation.resume(success)
         }

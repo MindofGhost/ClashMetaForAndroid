@@ -18,7 +18,6 @@ import (
 
 	"cfa/native/app"
 	"cfa/native/config"
-	"cfa/native/vkturn"
 
 	"github.com/metacubex/mihomo/log"
 	freeturn "github.com/samosvalishe/free-turn-proxy/mobile"
@@ -208,14 +207,16 @@ func startVkTurn(args C.c_string) {
 
 //export resolveVkTurnHost
 func resolveVkTurnHost(host C.c_string) *C.char {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	addresses, err := vkturn.ResolveHost(ctx, C.GoString(host))
+	hostname := C.GoString(host)
+	addresses, err := app.ResolveDirectHost(ctx, hostname)
 	if err != nil {
-		log.Infoln("[VK_TURN] resolver failed: %s", err.Error())
+		log.Infoln("[VK_TURN] startup DNS domain=%s result=false: %s", hostname, err.Error())
 		return nil
 	}
+	log.Infoln("[VK_TURN] startup DNS domain=%s result=true addresses=%s", hostname, strings.Join(addresses, ","))
 
 	return C.CString(strings.Join(addresses, ","))
 }
